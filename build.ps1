@@ -4,12 +4,14 @@ if (-not (Test-Path -LiteralPath $compiler)) { throw '.NET Framework 4.x compile
 $dist = Join-Path $PSScriptRoot 'dist'
 New-Item -ItemType Directory -Force -Path $dist | Out-Null
 $sources = @(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'src') -Filter '*.cs' | ForEach-Object { $_.FullName })
-$references = @('/r:System.dll','/r:System.Core.dll','/r:System.Drawing.dll','/r:System.Windows.Forms.dll','/r:System.Xml.dll')
+$references = @('/r:System.dll','/r:System.Core.dll','/r:System.Drawing.dll','/r:System.Windows.Forms.dll','/r:System.Xml.dll','/r:System.Management.dll')
 & $compiler /nologo /target:winexe /platform:x64 /optimize+ /utf8output ('/win32manifest:' + (Join-Path $PSScriptRoot 'app.manifest')) ('/out:' + (Join-Path $dist 'OpenAntiLag.exe')) @references @sources
 if ($LASTEXITCODE -ne 0) { throw 'Application compilation failed.' }
-$testSource = Join-Path $PSScriptRoot 'tests\Tests.cs'
+$testSource = @(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'tests') -Filter '*.cs' | ForEach-Object { $_.FullName })
 & $compiler /nologo /target:exe /platform:x64 /utf8output /main:OpenAntiLag.Tests ('/win32manifest:' + (Join-Path $PSScriptRoot 'app.manifest')) ('/out:' + (Join-Path $dist 'OpenAntiLag.Tests.exe')) @references @sources $testSource
 if ($LASTEXITCODE -ne 0) { throw 'Test compilation failed.' }
 & (Join-Path $dist 'OpenAntiLag.Tests.exe')
 if ($LASTEXITCODE -ne 0) { throw 'Tests failed.' }
 Write-Output ('Built: ' + (Join-Path $dist 'OpenAntiLag.exe'))
+
+

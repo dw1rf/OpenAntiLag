@@ -8,6 +8,8 @@ using System.Windows.Forms;
 namespace OpenAntiLag {
     public sealed class MainForm : Form {
         readonly Engine engine;
+        readonly ISystemClient system;
+        readonly ProfileController controller;
         readonly bool preview, startHidden;
         readonly Label status=new Label(), detail=new Label();
         readonly OptionCard gameMode=new OptionCard(), capture=new OptionCard(), mouse=new OptionCard(), cpu=new OptionCard(), pcie=new OptionCard(), timer=new OptionCard(), startup=new OptionCard { Compact=true };
@@ -19,17 +21,20 @@ namespace OpenAntiLag {
         bool busy, exiting, initializing=true;
         public MainForm(Engine engine,bool startHidden,bool preview) {
             this.engine=engine; this.preview=preview; this.startHidden=startHidden;
+            system=preview ? (ISystemClient)new PreviewSystemClient() : new SystemClient();
+            if(preview && engine.State.Phase=="Enabled")system.Enable();
+            controller=new ProfileController(engine,system);
             Text="Open AntiLag"; Font=new Font("Segoe UI",10); BackColor=Theme.Background; ForeColor=Theme.Text;
             AutoScaleDimensions=new SizeF(96,96); AutoScaleMode=AutoScaleMode.Dpi;
-            ClientSize=new Size(800,850); MinimumSize=new Size(640,570); StartPosition=FormStartPosition.CenterScreen; Icon=SystemIcons.Application;
+            ClientSize=new Size(800,890); MinimumSize=new Size(640,570); StartPosition=FormStartPosition.CenterScreen; Icon=SystemIcons.Application;
             var root=new TableLayoutPanel { Dock=DockStyle.Fill, Padding=new Padding(24), ColumnCount=1, RowCount=5, BackColor=Theme.Background };
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); root.RowStyles.Add(new RowStyle(SizeType.Percent,100)); root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); Controls.Add(root);
             var header=new TableLayoutPanel { Dock=DockStyle.Fill, AutoSize=true, ColumnCount=2, Margin=new Padding(0,0,0,20) };
             header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100)); header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             header.Controls.Add(Label("Open AntiLag",24,Theme.Text,true),0,0);
-            var version=Label("v0.3",10,Theme.Muted,false); version.Anchor=AnchorStyles.Right; header.Controls.Add(version,1,0);
-            var subtitle=Label("Настройки для игры. Один профиль, полный откат.",10,Theme.Muted,false); header.Controls.Add(subtitle,0,1); header.SetColumnSpan(subtitle,2); root.Controls.Add(header,0,0);
+            var version=Label("v0.4 beta",10,Theme.Muted,false); version.Anchor=AnchorStyles.Right; header.Controls.Add(version,1,0);
+            var subtitle=Label("Экспериментальный профиль. Сохранение исходных настроек.",10,Theme.Muted,false); header.Controls.Add(subtitle,0,1); header.SetColumnSpan(subtitle,2); root.Controls.Add(header,0,0);
             var stateCard=new TableLayoutPanel { Dock=DockStyle.Fill, AutoSize=true, ColumnCount=1, BackColor=Theme.Selected, Padding=new Padding(18,14,18,14), Margin=new Padding(0,0,0,20) };
             stateCard.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
             status.AutoSize=true; status.Dock=DockStyle.Fill; status.Text="Проверка состояния…"; status.Font=new Font(Font.FontFamily,16,FontStyle.Bold); status.ForeColor=Theme.Text; status.Margin=new Padding(0,0,0,6);
@@ -38,7 +43,7 @@ namespace OpenAntiLag {
             root.Controls.Add(scroll,0,2); scroll.Controls.Add(content); content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
             scroll.HandleCreated+=delegate { WindowTheme.Scrollbar(scroll.Handle); };
             var plan=Label("Профиль производительности",12,Theme.Text,true); plan.Margin=new Padding(0,0,0,6); content.Controls.Add(plan);
-            var powerNote=Label("Отдельный план питания. Исходные настройки сохраняются до включения.",10,Theme.Muted,false); powerNote.Margin=new Padding(0,0,0,16); content.Controls.Add(powerNote);
+            var powerNote=Label("Включает план питания, BCD/таймеры, HAGS и системные приоритеты.\nНужны права администратора и перезагрузка. Исходные значения сохраняются.",10,Theme.Muted,false); powerNote.Margin=new Padding(0,0,0,16); content.Controls.Add(powerNote);
             var grid=new TableLayoutPanel { AutoSize=true, AutoSizeMode=AutoSizeMode.GrowAndShrink, Dock=DockStyle.Top, ColumnCount=2, Margin=Padding.Empty };
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,50)); grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,50));
             var options=engine.State.Phase=="Disabled" ? ProfileOptions.Gaming() : engine.State.Options;
@@ -48,7 +53,7 @@ namespace OpenAntiLag {
             AddOption(grid,cpu,"CPU без парковки","От сети: минимум CPU 100%. Больше нагрев и расход.",1,1,options.CpuReady);
             AddOption(grid,pcie,"Питание PCIe","Отключить энергосбережение PCIe при питании от сети.",0,2,options.PcieReady);
             AddOption(grid,timer,"Таймер 1 мс","Эксперимент. Эффект в играх не гарантирован.",1,2,engine.State.TimerRequested); content.Controls.Add(grid);
-            var note=Label("Профиль может увеличить нагрев и расход энергии. После применения перезапустите игру.",9.5f,Theme.Muted,false); note.Margin=new Padding(0,2,0,12); content.Controls.Add(note);
+            var note=Label("Экспериментальный системный профиль: улучшение задержки не доказано. Может повлиять на стабильность, нагрев и расход энергии.",9.5f,Theme.Muted,false); note.Margin=new Padding(0,2,0,12); content.Controls.Add(note);
             var actions=new TableLayoutPanel { Dock=DockStyle.Fill, AutoSize=true, ColumnCount=2, Margin=new Padding(0,16,0,12) };
             actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,50)); actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,50));
             StyleButton(enable,"Включить профиль"); StyleButton(disable,"Отключить"); enable.Name="enable"; disable.Name="disable"; enable.Margin=new Padding(0,0,6,0); disable.Margin=new Padding(6,0,0,0);
@@ -59,10 +64,10 @@ namespace OpenAntiLag {
             startup.Text="Запускать с Windows"; startup.Dock=DockStyle.Fill; startup.Checked=!preview && Startup.Enabled; startup.Margin=Padding.Empty; footer.Controls.Add(startup,0,0);
             startup.CheckedChanged+=delegate { if(initializing||preview)return; try { Startup.Enabled=startup.Checked; } catch(Exception error) { initializing=true; startup.Checked=!startup.Checked; initializing=false; Report(error); } };
             footer.Controls.Add(Link("Журнал",delegate { if(!preview) { Directory.CreateDirectory(Program.DataDirectory); Process.Start("explorer.exe","\""+Program.DataDirectory+"\""); } }),1,0);
-            footer.Controls.Add(Link("О программе",delegate { MessageBox.Show(this,"Open AntiLag 0.3.0 • MIT\n\nИсходные значения сохраняются до изменений. Внешние изменения пользователя при откате сохраняются.\n\nПрофиль не гарантирует прирост FPS или нулевую задержку. Настройки Xbox зависят от версии Windows. Таймер 1 мс не является универсальной оптимизацией игр.\n\nBCD, HPET, HAGS и защита Windows не изменяются.","Open AntiLag",MessageBoxButtons.OK,MessageBoxIcon.Information); }),2,0); root.Controls.Add(footer,0,4);
+            footer.Controls.Add(Link("О программе",delegate { MessageBox.Show(this,"Open AntiLag 0.4.0 beta • MIT\n\nИсходные значения сохраняются до изменений. Внешние изменения пользователя при откате сохраняются.\n\nПрофиль не гарантирует прирост FPS или нулевую задержку. Настройки Xbox зависят от версии Windows. Таймер 1 мс не является универсальной оптимизацией игр.\n\nСистемный профиль меняет таймеры BCD, запрашивает HAGS и задаёт приоритеты. Microsoft относит эти BCD-параметры к отладочным. Защита Windows не отключается.","Open AntiLag",MessageBoxButtons.OK,MessageBoxIcon.Information); }),2,0); root.Controls.Add(footer,0,4);
             var menu=new ContextMenuStrip { BackColor=Theme.Surface, ForeColor=Theme.Text };
             menu.Items.Add("Открыть",null,delegate { Reveal(); });
-            menu.Items.Add("Выход",null,delegate { if(busy)return; if(engine.State.Phase!="Disabled" && MessageBox.Show(this,"Настройки профиля останутся применены. Для отката сначала нажмите «Отключить».\n\nВыйти?","Open AntiLag",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)return; exiting=true; Close(); });
+            menu.Items.Add("Выход",null,delegate { if(busy)return; if(MessageBox.Show(this,"Выход не отключает профиль. Для отката сначала нажмите «Отключить».\n\nВыйти?","Open AntiLag",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)return; exiting=true; Close(); });
             tray=new NotifyIcon { Icon=Icon,Text="Open AntiLag",ContextMenuStrip=menu,Visible=!preview }; tray.DoubleClick+=delegate { Reveal(); };
             FormClosing+=delegate(object sender,FormClosingEventArgs e) { if(!exiting && !preview && e.CloseReason==CloseReason.UserClosing) { e.Cancel=true; Hide(); } };
             Resize+=delegate { if(WindowState==FormWindowState.Minimized&&!preview)Hide(); };
@@ -83,16 +88,19 @@ namespace OpenAntiLag {
             if(on&&!preview&&Process.GetProcessesByName("68WAntiLagApp").Length>0) { MessageBox.Show(this,"Сначала закройте 68W AntiLag. Его прежние настройки Open AntiLag не отменяет.","Запущен другой AntiLag"); return; }
             busy=true; enable.Enabled=disable.Enabled=startup.Enabled=false; OptionsEnabled(false); status.Text=on?"Применение профиля…":"Восстановление…";
             var options=SelectedOptions();
-            try { await Task.Run(delegate { if(on)engine.Enable(options); else engine.Disable(); }); if(!preview)Program.Log(on?"Enabled profile":"Disabled profile"); }
+            try { await Task.Run(delegate { if(on)controller.Enable(options); else controller.Disable(); }); if(!preview)Program.Log(on?"Enabled system and user profile":"Disabled system and user profile"); }
             catch(Exception error) { Report(error); } finally { busy=false; }
             await RefreshState();
         }
         public async Task RefreshState() {
             if(busy)return; busy=true;
             try {
-                bool active=await Task.Run(delegate { return engine.IsActive; }); bool off=engine.State.Phase=="Disabled", recovery=!off&&engine.State.Phase!="Enabled";
-                status.Text=off?"Готов к включению":recovery?"Нужно восстановление":active?"Профиль включён":"Часть настроек изменена";
-                detail.Text=off?"Выберите настройки ниже и включите профиль.":recovery?"Операция не завершена. Нажмите «Восстановить».":active?"Чтобы изменить набор настроек, сначала отключите профиль.":"При восстановлении ваш внешний выбор будет сохранён.";
+                bool active=await Task.Run(delegate { return engine.IsActive; }); var machine=system.State;
+                bool off=engine.State.Phase=="Disabled"&&machine.Phase=="Disabled";
+                bool recovery=!off && (engine.State.Phase!="Enabled" || machine.Phase!="Enabled");
+                bool reboot=system.RebootPending;
+                status.Text=recovery?"Нужно восстановление":reboot?"Нужна перезагрузка ПК":off?"Готов к включению":active?"Профиль записан":"Часть настроек изменена";
+                detail.Text=recovery?"Части профиля не согласованы. Нажмите «Восстановить».":reboot?(off?"Исходные значения восстановлены. Перезагрузите Windows вручную.":"Системные значения записаны. Перезагрузите Windows вручную."):off?"Все системные настройки применяются кнопкой «Включить профиль».":active?"HAGS запрошен; поддержка зависит от GPU и драйвера.":"При восстановлении ваш внешний выбор будет сохранён.";
                 enable.Enabled=off; disable.Enabled=!off; disable.Text=recovery?"Восстановить":"Отключить"; OptionsEnabled(off); startup.Enabled=true;
                 tray.Text="Open AntiLag — "+(active?"включён":off?"выключен":"проверить состояние");
             } catch(Exception error) { status.Text="Ошибка проверки"; detail.Text=error.Message; enable.Enabled=false; disable.Enabled=engine.State.Phase!="Disabled"; }
@@ -102,3 +110,4 @@ namespace OpenAntiLag {
         protected override void Dispose(bool disposing) { if(disposing) { poll.Dispose(); tray.Dispose(); engine.Dispose(); } base.Dispose(disposing); }
     }
 }
+

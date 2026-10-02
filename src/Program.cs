@@ -11,6 +11,7 @@ namespace OpenAntiLag {
             catch { /* Logging failure must not prevent restoration. */ }
         }
         [STAThread] static void Main(string[] args) {
+            if (args.Length == 3 && args[0] == "--machine") { Environment.ExitCode = MachineWorker.Run(args[1], args[2]); return; }
             Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
             bool first;
             using (var mutex = new Mutex(true, "Local\\OpenAntiLag-" + Environment.UserName, out first)) {

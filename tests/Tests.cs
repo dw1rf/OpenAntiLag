@@ -93,7 +93,7 @@ namespace OpenAntiLag {
                     try { var store = new XmlStateStore(Path.Combine(dir,"state.xml")); store.Save(new ProfileState()); store.Save(new ProfileState { Phase = "Enabled", OriginalPlan = FakeHost.Original, OwnedPlan = Guid.NewGuid().ToString() }); Assert(store.Load().Phase == "Enabled", "Save failed"); File.WriteAllText(Path.Combine(dir,"state.xml"), "broken XML"); Throws(delegate { store.Load(); }); }
                     finally { if (Directory.Exists(dir)) Directory.Delete(dir,true); }
                 });
-                ProfileTests();
+                ProfileTests(); count += MachineTests.Run();
                 Console.WriteLine(count + " tests passed. No real system settings changed."); return 0;
             } catch(Exception error) { Console.Error.WriteLine(error); return 1; }
         }
@@ -162,3 +162,4 @@ namespace OpenAntiLag {
         }
     }
 }
+

@@ -1,8 +1,8 @@
-# Design QA — Open AntiLag 0.3
+# Design QA — Open AntiLag 0.4 beta 1
 
 Source: user-provided ready/active screenshots of 0.2 and blue-grey palette image (private references, not redistributed). This is a requested redesign, not a pixel clone of the old layout.
 
-Implementation evidence: docs/ready.png, docs/active.png, docs/small.png, docs/scale150.png, docs/scale200.png. Native WinForms client area captures, no CSS/browser viewport. Baseline 800 × 850 px; small 630 × 560; synthetic 150% and 200% controls AND fonts. Captures omit the OS-owned titlebar. DWM dark-mode readback = 1, caption-color setter HRESULT = 0 on the validation host. Actual monitor-to-monitor DPI transitions were not tested.
+Implementation evidence: docs/ready.png, docs/active.png, docs/small.png, docs/scale150.png, docs/scale200.png. Native WinForms client area captures, no CSS/browser viewport. Baseline 800 × 890 px; small 630 × 560; synthetic 150% and 200% controls AND fonts. Captures omit the OS-owned titlebar. DWM dark-mode readback = 1, caption-color setter HRESULT = 0 on the validation host. Actual monitor-to-monitor DPI transitions were not tested.
 
 ## Comparison and iterations
 
@@ -16,12 +16,15 @@ Implementation evidence: docs/ready.png, docs/active.png, docs/small.png, docs/s
 - Spacing: 24 px outer inset, 12 px card gaps, separate state/settings/actions/footer. Resizing uses TableLayoutPanel and a scrollable settings region.
 - Color: palette sampled from source swatches: #0B1423, #1F3952, #4D728F, #90B0C7, #CADCEA. Applied as background, selection, accents and text; foreground shades adjusted for contrast. No mint accent remains.
 - Assets: no decorative raster assets required by this settings screen. Standard native application icon is retained. Source palette image not redistributed.
-- Content: existing actions preserved; English/Russian duplicated button labels simplified to Russian. Warning about energy use and restarting the game remains available.
+- Content: existing actions preserved; English/Russian duplicated button labels simplified to Russian. Experimental system profile, administrator rights and manual restart are stated explicitly.
 
 ## Interaction validation
 
-27 engine tests passed. Simulated UI test invokes actual Enable/Disable buttons and checks enabled/locked/restored states; narrow-window layout assertions passed. No real power or registry settings were changed. Theme APIs returned successful dark-mode/caption results. Keyboard semantics/accessibility roles inherited from native Button/CheckBox; a screen-reader audit was not performed.
+49 engine tests passed. Simulated UI test invokes actual Enable/Disable buttons and checks enabled/locked/restored states; narrow-window layout assertions passed. No real power or registry settings were changed. Theme APIs returned successful dark-mode/caption results. Keyboard semantics/accessibility roles inherited from native Button/CheckBox; a screen-reader audit was not performed.
 
 No outstanding P0/P1/P2 findings in the tested states. P3: native message boxes still use the system dialog theme; cross-monitor DPI and high-contrast mode need wider hardware testing.
 
-final result: passed
+Visual result: passed. System application and post-reboot behavior remain unverified; see README.
+
+
+0.4 adds an explicit experimental subtitle, BCD/HAGS/priority scope, a pending-restart state and 40 px more default height to keep the warning visible. All five captures were regenerated; ready/active/small captures visually reviewed.
