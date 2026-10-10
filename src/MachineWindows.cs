@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -111,6 +111,7 @@ namespace OpenAntiLag {
         public static int Run(string action,string expectedSid) {
             try {
                 if(!IsAdmin || expectedSid!=Sid)throw new UnauthorizedAccessException("Подтвердите UAC для той же учётной записи Windows.");
+                if(action=="check")return 0; // Read-only UAC probe, no system engine or settings accessed.
                 bool created;
                 using(var mutex=new Mutex(true,@"Global\OpenAntiLag-SystemProfile",out created)) {
                     bool owned=created;
@@ -125,9 +126,12 @@ namespace OpenAntiLag {
             } catch(Exception error) {System.Windows.Forms.MessageBox.Show(error.Message,"Open AntiLag — системный профиль",System.Windows.Forms.MessageBoxButtons.OK,System.Windows.Forms.MessageBoxIcon.Error);return 1;}
         }
         public static void Elevate(bool enable) {
-            var info=new ProcessStartInfo(System.Windows.Forms.Application.ExecutablePath,"--machine "+(enable?"enable":"disable")+" "+Sid) {UseShellExecute=true,Verb="runas",WindowStyle=ProcessWindowStyle.Hidden};
-            try {using(var process=Process.Start(info)) {process.WaitForExit();if(process.ExitCode!=0)throw new IOException("Системная операция не завершена. Подробности показаны в окне администратора. При необходимости нажмите «Восстановить».");}}
-            catch(Win32Exception error) {if(error.NativeErrorCode==1223)throw new OperationCanceledException("Запрос прав администратора отменён. Системная операция не запущена.",error);throw;}
+            string action=enable?"enable":"disable";
+            if(IsAdmin) {
+                if(Run(action,Sid)!=0)throw new IOException("Системная операция не завершена. Подробности показаны в окне администратора.");
+                return;
+            }
+            ElevatedProcess.Run(System.Windows.Forms.Application.ExecutablePath,"--machine "+action+" "+Sid);
         }
     }
 }

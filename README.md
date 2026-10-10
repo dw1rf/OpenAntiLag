@@ -1,4 +1,4 @@
-﻿# Open AntiLag 0.5.1
+﻿# Open AntiLag 0.5.5
 
 [Скачать EXE](https://github.com/dw1rf/OpenAntiLag/releases/latest) · [MIT](LICENSE)
 
@@ -109,3 +109,7 @@ Microsoft описывает перечисленные BCD-переключат
 - [Microsoft: SystemParametersInfo](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-systemparametersinfow)
 
 Самостоятельная реализация, не связанная с 68Whiskey. Лицензия MIT.
+
+## Настройки видеокарт
+
+NVIDIA: глобальные параметры через NVAPI. AMD: выбор Radeon и шесть глобальных параметров через ADLX; поддержка экспериментальная, без проверки на реальной Radeon. Обе вкладки сохраняют исходные значения и поддерживают восстановление. Подробности — RELEASE_NOTES.md, docs/nvidia-implementation.md и docs/amd-implementation.md. Сборка: ./build.ps1 -OutputDirectory dist-amd.

@@ -42,6 +42,25 @@ namespace OpenAntiLag {
         static void Throws(Action action) { bool threw = false; try { action(); } catch { threw = true; } Assert(threw, "Expected failure"); }
         static void Test(string name, Action action) { action(); Console.WriteLine("PASS " + name); count++; }
         [STAThread] public static int Main(string[] args) {
+            if(args.Length==1&&args[0]=="--amd-read") {try {using(var d=new AmdDriver()){foreach(var gpu in d.Devices){Console.WriteLine(gpu.Name);d.Select(gpu.Id);foreach(var k in AmdProfiles.Keys)Console.WriteLine(k+": "+d.Read(k));}}return 0;}catch(NotSupportedException ex){Console.WriteLine(ex.Message);return 0;}catch(Exception ex){Console.Error.WriteLine(ex);return 1;}}
+            if(args.Length==1&&args[0]=="--check-elevation") {try {ElevatedProcess.Run(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"OpenAntiLag.exe"),"--machine check "+MachineWorker.Sid);Console.WriteLine("PASS actual UAC launch; no system settings changed.");return 0;}catch(Exception ex){Console.Error.WriteLine(ex);return 1;}}
+            if(args.Length==1&&args[0]=="--nvidia-stage-check") {
+                try {
+                    var plan=NvidiaPreset.Build(false,0,false,false);var before=new Dictionary<uint,NvidiaValue>();
+                    using(var d=new NvidiaDriver()) {
+                        foreach(var s in plan)before[s.Id]=d.Read(s.Id);
+                        foreach(var s in plan)d.Write(s.Id,s.Value);
+                        foreach(var s in plan)Assert(d.Read(s.Id).Value==s.Value,"Staged value mismatch");
+                        foreach(var s in plan) {var old=before[s.Id];if(old!=null&&old.UserOverride)d.Write(s.Id,old.Value);else d.Reset(s.Id);}
+                        foreach(var s in plan) {var a=before[s.Id];var b=d.Read(s.Id);Assert(a==null?b==null:b!=null&&a.Value==b.Value&&a.UserOverride==b.UserOverride,"Staged restoration mismatch");}
+                        // Intentionally NO Save: session-only compatibility test.
+                    }
+                    using(var d=new NvidiaDriver())foreach(var s in plan) {var a=before[s.Id];var b=d.Read(s.Id);Assert(a==null?b==null:b!=null&&a.Value==b.Value&&a.UserOverride==b.UserOverride,"Persistent state changed");}
+                    Console.WriteLine("PASS NVIDIA 25 settings staged and restored in disposable session; persistent values unchanged.");return 0;
+                }catch(Exception ex){Console.Error.WriteLine(ex);return 1;}
+            }
+            if(args.Length==1&&args[0]=="--nvidia-read") { try { Console.WriteLine(new NvidiaController(()=>new NvidiaDriver(),new NvidiaStore(Path.Combine(Program.DataDirectory,"nvidia-backup.xml"))).Inspect(NvidiaPreset.Build(false,0,false,false))); return 0; } catch(Exception ex) {Console.Error.WriteLine(ex);return 1;} }
+            if(args.Length==2&&args[0]=="--export-gpu") { Directory.CreateDirectory(args[1]); foreach(bool amd in new[]{false,true}) foreach(bool smooth in new[]{false,true}) File.WriteAllText(Path.Combine(args[1],(amd?"AMD":"NVIDIA-617.42")+(smooth?"-VRR":"-Esports")+".txt"),GpuConfigs.Guide(amd,smooth),new System.Text.UTF8Encoding(true)); return 0; }
             if(args.Length==1&&args[0]=="--fetch-latest") {try {var package=Updates.Download(new Version(0,0,0,0)).GetAwaiter().GetResult();Console.WriteLine(package==null?"No release":"Verified GitHub download: "+package.Version+" SHA256 "+package.Hash);return 0;}catch(Exception error){Console.Error.WriteLine(error);return 1;}}
             if(args.Length == 1 && args[0] == "--ui-check") return UiCheck();
             if (args.Length == 1 && args[0] == "--inspect") {
@@ -61,6 +80,7 @@ namespace OpenAntiLag {
                         foreach(var pair in fonts) pair.Key.Font=new Font(pair.Value.FontFamily,pair.Value.Size*scale,pair.Value.Style);
                         f.ResumeLayout(true);
                     }
+                    if(args.Length>2 && (args[2]=="nvidia" || args[2]=="amd")) ((TabControl)f.Controls.Find("mainTabs",true)[0]).SelectedIndex=args[2]=="amd"?2:1;
                     var tick = new System.Windows.Forms.Timer { Interval = 600 };
                     tick.Tick += delegate {
                         tick.Stop();
@@ -94,7 +114,9 @@ namespace OpenAntiLag {
                     try { var store = new XmlStateStore(Path.Combine(dir,"state.xml")); store.Save(new ProfileState()); store.Save(new ProfileState { Phase = "Enabled", OriginalPlan = FakeHost.Original, OwnedPlan = Guid.NewGuid().ToString() }); Assert(store.Load().Phase == "Enabled", "Save failed"); File.WriteAllText(Path.Combine(dir,"state.xml"), "broken XML"); Throws(delegate { store.Load(); }); }
                     finally { if (Directory.Exists(dir)) Directory.Delete(dir,true); }
                 });
-                ProfileTests(); count += MachineTests.Run(); count += UpdateTests.Run();
+                ProfileTests(); count += MachineTests.Run(); count += UpdateTests.Run(); count += NvidiaTests.Run();count += AmdTests.Run();                Test("UAC launches on STA with exact path and working directory",delegate {ElevatedProcess.Run(System.Windows.Forms.Application.ExecutablePath,"--machine check test",delegate(System.Diagnostics.ProcessStartInfo info){Assert(System.Threading.Thread.CurrentThread.GetApartmentState()==System.Threading.ApartmentState.STA,"Not STA");Assert(info.Verb=="runas"&&info.UseShellExecute&&info.WorkingDirectory==Path.GetDirectoryName(info.FileName)&&info.Arguments=="--machine check test","Wrong UAC request");return 0;});});
+                Test("UAC cancellation remains cancellation",delegate {try {ElevatedProcess.Run(System.Windows.Forms.Application.ExecutablePath,"test",delegate {throw new System.ComponentModel.Win32Exception(1223);});throw new Exception("Expected cancellation");}catch(OperationCanceledException){}});
+                Test("UAC unknown native error is actionable",delegate {try {ElevatedProcess.Run(System.Windows.Forms.Application.ExecutablePath,"test",delegate {throw new System.ComponentModel.Win32Exception(-2);});throw new Exception("Expected launch failure");}catch(IOException ex){Assert(ex.Message.Contains("0xFFFFFFFE")&&ex.InnerException is System.ComponentModel.Win32Exception,"Lost diagnostic");}});
                 Console.WriteLine(count + " tests passed. No real system settings changed."); return 0;
             } catch(Exception error) { Console.Error.WriteLine(error); return 1; }
         }
@@ -116,7 +138,21 @@ namespace OpenAntiLag {
                         await WaitUntil(delegate { return engine.State.Phase=="Disabled" && on.Enabled; });
                         form.ClientSize=new Size(630,560); form.PerformLayout(); CheckLayout(form);
                         Assert(on.Bottom<=on.Parent.ClientSize.Height && off.Enabled==false,"Action state/layout invalid");
-                        Console.WriteLine("PASS UI: Enable, active state, Disable, restored state, narrow layout");
+                        var tabs=(TabControl)form.Controls.Find("mainTabs",true)[0];
+                        for(int i=1;i<3;i++) { tabs.SelectedIndex=i; form.PerformLayout(); var mode=(ComboBox)tabs.TabPages[i].Controls.Find("gpuMode",true)[0]; var guide=(TextBox)tabs.TabPages[i].Controls.Find("gpuGuide",true)[0]; mode.SelectedIndex=1; Assert(guide.Text.Contains("РЕЖИМ: БЕЗ РАЗРЫВОВ"),"VRR guide did not change"); mode.SelectedIndex=0; Assert(guide.Text.Contains("РЕЖИМ: МИНИМАЛЬНАЯ ЗАДЕРЖКА"),"Esports guide did not change"); Assert(guide.Height>100 && guide.Width>400,"Guide not readable"); }
+                        var gpuDevice=new FakeNvidiaDevice();var gpuStore=new MemoryNvidiaStore();bool locked=false;
+                        var gpuPage=new NvidiaPage(false,delegate {if(locked)return false;locked=true;return true;},delegate {locked=false;},new NvidiaController(gpuDevice.Open,gpuStore));
+                        tabs.TabPages.Add(gpuPage);tabs.SelectedTab=gpuPage;
+                        var gpuApply=(Button)gpuPage.Controls.Find("applyNvidia",true)[0];var gpuRestore=(Button)gpuPage.Controls.Find("restoreNvidia",true)[0];
+                        await WaitUntil(()=>gpuApply.Enabled&&!locked);gpuApply.PerformClick();await WaitUntil(()=>gpuApply.Enabled&&!locked);
+                        Assert(gpuStore.State!=null&&gpuStore.State.Phase=="Applied","UI GPU apply failed");
+                        gpuRestore.PerformClick();await WaitUntil(()=>gpuRestore.Enabled&&!locked);Assert(gpuStore.State==null&&gpuDevice.Overrides.Count==0,"UI GPU restore failed");
+                        tabs.TabPages.Remove(gpuPage);gpuPage.Dispose();
+                        var amdDriver=new FakeAmd();var amdStore=new MemoryAmd();var amdPage=new AmdPage(false,()=>true,()=>{},new AmdProfiles(()=>amdDriver,amdStore));tabs.TabPages.Add(amdPage);tabs.SelectedTab=amdPage;
+                        var amdApply=(Button)amdPage.Controls.Find("applyAmd",true)[0];var amdRestore=(Button)amdPage.Controls.Find("restoreAmd",true)[0];
+                        await WaitUntil(()=>amdApply.Enabled);amdApply.PerformClick();await WaitUntil(()=>amdApply.Enabled);Assert(amdStore.Load()!=null&&amdStore.Load().Phase=="Applied","AMD UI apply failed");
+                        amdRestore.PerformClick();await WaitUntil(()=>amdRestore.Enabled);Assert(amdStore.Load()==null&&amdDriver.Values["chill"]==1,"AMD UI restore failed");tabs.TabPages.Remove(amdPage);amdPage.Dispose();
+                        Console.WriteLine("PASS UI: system actions, GPU tabs, NVIDIA apply/restore buttons on simulated driver, narrow layout");
                     } catch(Exception ex) { Console.Error.WriteLine(ex); result=1; }
                     form.Close();
                 };
