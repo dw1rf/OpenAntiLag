@@ -6,8 +6,8 @@ using System.Windows.Forms;
 
 namespace OpenAntiLag {
     public sealed class NvidiaPage : TabPage {
-        readonly ComboBox mode=new ComboBox {Name="gpuMode",DropDownStyle=ComboBoxStyle.DropDownList,Dock=DockStyle.Fill};
-        readonly NumericUpDown fps=new NumericUpDown {Minimum=20,Maximum=1000,Value=141,Width=85,AccessibleName="Лимит FPS для G-SYNC"};
+        readonly ComboBox mode=new ThemedComboBox {Name="gpuMode",DropDownStyle=ComboBoxStyle.DropDownList,Dock=DockStyle.Fill};
+        readonly NumericUpDown fps=new ThemedNumericUpDown {Minimum=20,Maximum=1000,Value=141,Width=85,AccessibleName="Лимит FPS для G-SYNC"};
         readonly CheckBox power=new CheckBox {Text="Максимальное питание (больше нагрев)",AutoSize=true};
         readonly CheckBox quality=new CheckBox {Text="Фильтрация High Performance (хуже качество)",AutoSize=true};
         readonly TextBox body=new TextBox {Name="gpuGuide",Multiline=true,ReadOnly=true,ScrollBars=ScrollBars.Vertical,Dock=DockStyle.Fill,BorderStyle=BorderStyle.None};

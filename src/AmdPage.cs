@@ -5,8 +5,8 @@ using System.Windows.Forms;
 
 namespace OpenAntiLag {
     public sealed class AmdPage:TabPage {
-        readonly ComboBox devices=new ComboBox {Name="amdDevice",DropDownStyle=ComboBoxStyle.DropDownList,Dock=DockStyle.Fill};
-        readonly ComboBox mode=new ComboBox {Name="gpuMode",DropDownStyle=ComboBoxStyle.DropDownList,Dock=DockStyle.Fill};
+        readonly ComboBox devices=new ThemedComboBox {Name="amdDevice",DropDownStyle=ComboBoxStyle.DropDownList,Dock=DockStyle.Fill};
+        readonly ComboBox mode=new ThemedComboBox {Name="gpuMode",DropDownStyle=ComboBoxStyle.DropDownList,Dock=DockStyle.Fill};
         readonly CheckBox anti=new CheckBox {Text="Обычный Radeon Anti-Lag (без Anti-Lag 2 в игре)",AutoSize=true,Checked=true};
         readonly TextBox body=new TextBox {Name="gpuGuide",Multiline=true,ReadOnly=true,Dock=DockStyle.Fill,ScrollBars=ScrollBars.Vertical,BorderStyle=BorderStyle.None};
         readonly TextBox status=new TextBox {Name="amdStatus",Multiline=true,ReadOnly=true,Dock=DockStyle.Fill,ScrollBars=ScrollBars.Vertical,Height=70,BorderStyle=BorderStyle.None};

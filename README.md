@@ -1,4 +1,4 @@
-﻿# Open AntiLag 0.5.5
+﻿# Open AntiLag 0.5.6
 
 [Скачать EXE](https://github.com/dw1rf/OpenAntiLag/releases/latest) · [MIT](LICENSE)
 
