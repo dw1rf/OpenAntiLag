@@ -20,7 +20,7 @@ namespace OpenAntiLag {
     public static class Updates {
         public const string Repository="https://github.com/dw1rf/OpenAntiLag";
         public const string Endpoint="https://api.github.com/repos/dw1rf/OpenAntiLag/releases/latest";
-        public static readonly Version Current=new Version(0,5,0,0);
+        public static readonly Version Current=new Version(0,5,1,0);
         const long MaxAsset=32*1024*1024;
         static string Preference {get{return Path.Combine(Program.DataDirectory,"updates.disabled");}}
         public static bool Enabled {get{return !File.Exists(Preference);} set {Directory.CreateDirectory(Program.DataDirectory);if(value) {if(File.Exists(Preference))File.Delete(Preference);}else File.WriteAllText(Preference,"disabled");}}
@@ -45,7 +45,7 @@ namespace OpenAntiLag {
         static async Task<byte[]> Get(string address,long limit) {
             ServicePointManager.SecurityProtocol|=SecurityProtocolType.Tls12;
             using(var handler=new HttpClientHandler {AllowAutoRedirect=false})using(var client=new HttpClient(handler) {Timeout=TimeSpan.FromSeconds(45),MaxResponseContentBufferSize=limit}) {
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("OpenAntiLag/0.5.0");
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("OpenAntiLag/0.5.1");
                 Uri url=new Uri(address);
                 for(int n=0;n<6;n++) {
                     if(!Trusted(url))throw new InvalidDataException("Недопустимый адрес обновления.");

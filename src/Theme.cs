@@ -83,6 +83,10 @@ namespace OpenAntiLag {
         }
     }
     public static class WindowTheme {
+        public static Icon AppIcon() {
+            using(var stream=typeof(WindowTheme).Assembly.GetManifestResourceStream("OpenAntiLag.AppIcon"))
+            using(var icon=new Icon(stream))return (Icon)icon.Clone();
+        }
         static int captionResult;
         [DllImport("uxtheme.dll",CharSet=CharSet.Unicode)] static extern int SetWindowTheme(IntPtr hwnd,string app,string ids);
         [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd,int attr,ref int value,int length);
