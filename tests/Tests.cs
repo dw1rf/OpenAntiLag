@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -42,6 +42,7 @@ namespace OpenAntiLag {
         static void Throws(Action action) { bool threw = false; try { action(); } catch { threw = true; } Assert(threw, "Expected failure"); }
         static void Test(string name, Action action) { action(); Console.WriteLine("PASS " + name); count++; }
         [STAThread] public static int Main(string[] args) {
+            if(args.Length==1&&args[0]=="--fetch-latest") {try {var package=Updates.Download(new Version(0,0,0,0)).GetAwaiter().GetResult();Console.WriteLine(package==null?"No release":"Verified GitHub download: "+package.Version+" SHA256 "+package.Hash);return 0;}catch(Exception error){Console.Error.WriteLine(error);return 1;}}
             if(args.Length == 1 && args[0] == "--ui-check") return UiCheck();
             if (args.Length == 1 && args[0] == "--inspect") {
                 try { var host = new WindowsHost(); Console.WriteLine("Read-only Windows adapter check"); Console.WriteLine("Power plan: " + host.ActivePlan()); foreach (string id in Settings.Selected(ProfileOptions.Gaming())) { var value = host.ReadSetting(id); Console.WriteLine(id + ": " + (value == null ? "absent" : String.Join(",", value))); } return 0; }
@@ -93,7 +94,7 @@ namespace OpenAntiLag {
                     try { var store = new XmlStateStore(Path.Combine(dir,"state.xml")); store.Save(new ProfileState()); store.Save(new ProfileState { Phase = "Enabled", OriginalPlan = FakeHost.Original, OwnedPlan = Guid.NewGuid().ToString() }); Assert(store.Load().Phase == "Enabled", "Save failed"); File.WriteAllText(Path.Combine(dir,"state.xml"), "broken XML"); Throws(delegate { store.Load(); }); }
                     finally { if (Directory.Exists(dir)) Directory.Delete(dir,true); }
                 });
-                ProfileTests(); count += MachineTests.Run();
+                ProfileTests(); count += MachineTests.Run(); count += UpdateTests.Run();
                 Console.WriteLine(count + " tests passed. No real system settings changed."); return 0;
             } catch(Exception error) { Console.Error.WriteLine(error); return 1; }
         }
@@ -162,4 +163,3 @@ namespace OpenAntiLag {
         }
     }
 }
-

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -18,7 +18,11 @@ namespace OpenAntiLag {
         readonly System.Windows.Forms.Timer poll;
         readonly Panel scroll=new Panel { Dock=DockStyle.Fill, AutoScroll=true };
         readonly TableLayoutPanel content=new TableLayoutPanel { AutoSize=true, AutoSizeMode=AutoSizeMode.GrowAndShrink, Dock=DockStyle.Top, ColumnCount=1, Margin=Padding.Empty };
-        bool busy, exiting, initializing=true;
+        bool busy, exiting, initializing=true, checkingUpdate;
+        readonly Label updateStatus=new Label();
+        readonly OptionCard autoUpdate=new OptionCard {Compact=true};
+        UpdatePackage pendingUpdate;
+        DateTime nextUpdate=DateTime.UtcNow;
         public MainForm(Engine engine,bool startHidden,bool preview) {
             this.engine=engine; this.preview=preview; this.startHidden=startHidden;
             system=preview ? (ISystemClient)new PreviewSystemClient() : new SystemClient();
@@ -26,24 +30,24 @@ namespace OpenAntiLag {
             controller=new ProfileController(engine,system);
             Text="Open AntiLag"; Font=new Font("Segoe UI",10); BackColor=Theme.Background; ForeColor=Theme.Text;
             AutoScaleDimensions=new SizeF(96,96); AutoScaleMode=AutoScaleMode.Dpi;
-            ClientSize=new Size(800,890); MinimumSize=new Size(640,570); StartPosition=FormStartPosition.CenterScreen; Icon=SystemIcons.Application;
+            ClientSize=new Size(800,930); MinimumSize=new Size(640,570); StartPosition=FormStartPosition.CenterScreen; Icon=SystemIcons.Application;
             var root=new TableLayoutPanel { Dock=DockStyle.Fill, Padding=new Padding(24), ColumnCount=1, RowCount=5, BackColor=Theme.Background };
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); root.RowStyles.Add(new RowStyle(SizeType.Percent,100)); root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); root.RowStyles.Add(new RowStyle(SizeType.AutoSize)); Controls.Add(root);
             var header=new TableLayoutPanel { Dock=DockStyle.Fill, AutoSize=true, ColumnCount=2, Margin=new Padding(0,0,0,20) };
             header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100)); header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             header.Controls.Add(Label("Open AntiLag",24,Theme.Text,true),0,0);
-            var version=Label("v0.4 beta",10,Theme.Muted,false); version.Anchor=AnchorStyles.Right; header.Controls.Add(version,1,0);
-            var subtitle=Label("Экспериментальный профиль. Сохранение исходных настроек.",10,Theme.Muted,false); header.Controls.Add(subtitle,0,1); header.SetColumnSpan(subtitle,2); root.Controls.Add(header,0,0);
-            var stateCard=new TableLayoutPanel { Dock=DockStyle.Fill, AutoSize=true, ColumnCount=1, BackColor=Theme.Selected, Padding=new Padding(18,14,18,14), Margin=new Padding(0,0,0,20) };
+            var version=Label("v0.5",10,Theme.Muted,false); version.Anchor=AnchorStyles.Right; header.Controls.Add(version,1,0);
+            var subtitle=Label("Твой игровой профиль. Под контролем.",10,Theme.Muted,false); header.Controls.Add(subtitle,0,1); header.SetColumnSpan(subtitle,2); root.Controls.Add(header,0,0);
+            var stateCard=new GradientCard { Dock=DockStyle.Fill, AutoSize=true, ColumnCount=1, BackColor=Theme.Background, Padding=new Padding(18,14,18,14), Margin=new Padding(0,0,0,20) };
             stateCard.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
-            status.AutoSize=true; status.Dock=DockStyle.Fill; status.Text="Проверка состояния…"; status.Font=new Font(Font.FontFamily,16,FontStyle.Bold); status.ForeColor=Theme.Text; status.Margin=new Padding(0,0,0,6);
-            detail.AutoSize=true; detail.Dock=DockStyle.Fill; detail.Text="Читаем сохранённый профиль."; detail.ForeColor=Theme.Muted; detail.Margin=Padding.Empty;
+            status.BackColor=Color.Transparent; detail.BackColor=Color.Transparent; status.AutoSize=true; status.Dock=DockStyle.Fill; status.Text="Проверка состояния…"; status.Font=new Font(Font.FontFamily,16,FontStyle.Bold); status.ForeColor=Theme.Text; status.Margin=new Padding(0,0,0,6);
+            detail.AutoSize=true; detail.Dock=DockStyle.Fill; detail.Text="Читаем сохранённый профиль."; detail.ForeColor=Theme.Text; detail.Margin=Padding.Empty;
             stateCard.Controls.Add(status); stateCard.Controls.Add(detail); root.Controls.Add(stateCard,0,1);
             root.Controls.Add(scroll,0,2); scroll.Controls.Add(content); content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
             scroll.HandleCreated+=delegate { WindowTheme.Scrollbar(scroll.Handle); };
             var plan=Label("Профиль производительности",12,Theme.Text,true); plan.Margin=new Padding(0,0,0,6); content.Controls.Add(plan);
-            var powerNote=Label("Включает план питания, BCD/таймеры, HAGS и системные приоритеты.\nНужны права администратора и перезагрузка. Исходные значения сохраняются.",10,Theme.Muted,false); powerNote.Margin=new Padding(0,0,0,16); content.Controls.Add(powerNote);
+            var powerNote=Label("Включает план питания, BCD/таймеры, HAGS и системные приоритеты.\nСохраняет исходные значения. Нужны права администратора и перезагрузка.",10,Theme.Muted,false); powerNote.Margin=new Padding(0,0,0,16); content.Controls.Add(powerNote);
             var grid=new TableLayoutPanel { AutoSize=true, AutoSizeMode=AutoSizeMode.GrowAndShrink, Dock=DockStyle.Top, ColumnCount=2, Margin=Padding.Empty };
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,50)); grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,50));
             var options=engine.State.Phase=="Disabled" ? ProfileOptions.Gaming() : engine.State.Options;
@@ -64,15 +68,20 @@ namespace OpenAntiLag {
             startup.Text="Запускать с Windows"; startup.Dock=DockStyle.Fill; startup.Checked=!preview && Startup.Enabled; startup.Margin=Padding.Empty; footer.Controls.Add(startup,0,0);
             startup.CheckedChanged+=delegate { if(initializing||preview)return; try { Startup.Enabled=startup.Checked; } catch(Exception error) { initializing=true; startup.Checked=!startup.Checked; initializing=false; Report(error); } };
             footer.Controls.Add(Link("Журнал",delegate { if(!preview) { Directory.CreateDirectory(Program.DataDirectory); Process.Start("explorer.exe","\""+Program.DataDirectory+"\""); } }),1,0);
-            footer.Controls.Add(Link("О программе",delegate { MessageBox.Show(this,"Open AntiLag 0.4.0 beta • MIT\n\nИсходные значения сохраняются до изменений. Внешние изменения пользователя при откате сохраняются.\n\nПрофиль не гарантирует прирост FPS или нулевую задержку. Настройки Xbox зависят от версии Windows. Таймер 1 мс не является универсальной оптимизацией игр.\n\nСистемный профиль меняет таймеры BCD, запрашивает HAGS и задаёт приоритеты. Microsoft относит эти BCD-параметры к отладочным. Защита Windows не отключается.","Open AntiLag",MessageBoxButtons.OK,MessageBoxIcon.Information); }),2,0); root.Controls.Add(footer,0,4);
+            footer.Controls.Add(Link("О программе",delegate { MessageBox.Show(this,"Open AntiLag 0.5.0 • MIT\n\nИсходные значения сохраняются до изменений. Внешние изменения пользователя при откате сохраняются.\n\nПрофиль не гарантирует прирост FPS или нулевую задержку. Настройки Xbox зависят от версии Windows. Таймер 1 мс не является универсальной оптимизацией игр.\n\nСистемный профиль меняет таймеры BCD, запрашивает HAGS и задаёт приоритеты. Microsoft относит эти BCD-параметры к отладочным. Защита Windows не отключается.","Open AntiLag",MessageBoxButtons.OK,MessageBoxIcon.Information); }),2,0); root.Controls.Add(footer,0,4);
+            autoUpdate.Text="Автообновления"; autoUpdate.Dock=DockStyle.Fill; autoUpdate.Margin=Padding.Empty;autoUpdate.Checked=preview||Updates.Enabled;
+            footer.Controls.Add(autoUpdate,0,1);
+            autoUpdate.CheckedChanged+=delegate {if(initializing||preview)return;try {Updates.Enabled=autoUpdate.Checked;if(!autoUpdate.Checked)pendingUpdate=null;}catch(Exception error){Report(error);} };
+            var checkUpdates=Link("Проверить",async delegate {if(!preview)await CheckUpdate(true);});footer.Controls.Add(checkUpdates,1,1);footer.SetColumnSpan(checkUpdates,2);
+            updateStatus.Text="Обновления из GitHub Releases";updateStatus.ForeColor=Theme.Muted;updateStatus.Font=new Font(Font.FontFamily,9);updateStatus.AutoSize=true;updateStatus.Dock=DockStyle.Fill;updateStatus.Margin=new Padding(0,2,0,0);footer.Controls.Add(updateStatus,0,2);footer.SetColumnSpan(updateStatus,3);
             var menu=new ContextMenuStrip { BackColor=Theme.Surface, ForeColor=Theme.Text };
             menu.Items.Add("Открыть",null,delegate { Reveal(); });
             menu.Items.Add("Выход",null,delegate { if(busy)return; if(MessageBox.Show(this,"Выход не отключает профиль. Для отката сначала нажмите «Отключить».\n\nВыйти?","Open AntiLag",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)return; exiting=true; Close(); });
             tray=new NotifyIcon { Icon=Icon,Text="Open AntiLag",ContextMenuStrip=menu,Visible=!preview }; tray.DoubleClick+=delegate { Reveal(); };
             FormClosing+=delegate(object sender,FormClosingEventArgs e) { if(!exiting && !preview && e.CloseReason==CloseReason.UserClosing) { e.Cancel=true; Hide(); } };
             Resize+=delegate { if(WindowState==FormWindowState.Minimized&&!preview)Hide(); };
-            poll=new System.Windows.Forms.Timer { Interval=5000 }; poll.Tick+=async delegate { if(!busy&&Visible)await RefreshState(); };
-            Shown+=async delegate { if(startHidden)Hide(); busy=true; try { await Task.Run((Action)engine.Resume); } catch(Exception error) { Report(error); } finally { busy=false; } await RefreshState(); if(!preview)poll.Start(); };
+            poll=new System.Windows.Forms.Timer { Interval=5000 }; poll.Tick+=async delegate { if(!busy&&Visible)await RefreshState(); if(!busy) {TryInstallUpdate(); if(Updates.Enabled&&DateTime.UtcNow>=nextUpdate)await CheckUpdate(false);} };
+            Shown+=async delegate { if(startHidden)Hide(); busy=true; try { await Task.Run((Action)engine.Resume); } catch(Exception error) { Report(error); } finally { busy=false; } await RefreshState(); if(!preview) {poll.Start();if(Updates.Enabled)await CheckUpdate(false);} };
             initializing=false;
         }
         protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); WindowTheme.Apply(Handle); }
@@ -106,8 +115,28 @@ namespace OpenAntiLag {
             } catch(Exception error) { status.Text="Ошибка проверки"; detail.Text=error.Message; enable.Enabled=false; disable.Enabled=engine.State.Phase!="Disabled"; }
             finally { busy=false; }
         }
+        async Task CheckUpdate(bool manual) {
+            if(checkingUpdate||exiting||IsDisposed)return;
+            checkingUpdate=true;nextUpdate=DateTime.UtcNow.AddHours(6);
+            updateStatus.Text="Проверка и загрузка обновлений…";
+            try {
+                var package=await Updates.Download();
+                if(IsDisposed||exiting)return;
+                if(!manual&&!autoUpdate.Checked) {updateStatus.Text="Автообновления выключены";return;}
+                pendingUpdate=package;
+                updateStatus.Text=package==null?"Установлена актуальная версия":"Версия "+package.Version.ToString(3)+" готова. Ожидание завершения операции…";
+                TryInstallUpdate();
+            } catch(Exception error) {Program.Log("Update check: "+error.Message);if(!IsDisposed)updateStatus.Text="Не удалось обновить. Повторная проверка позже.";}
+            finally {checkingUpdate=false;}
+        }
+        void TryInstallUpdate() {
+            if(pendingUpdate==null||busy||exiting||IsDisposed)return;
+            try {
+                if(engine.State.Phase=="Applying"||engine.State.Phase=="Restoring"||system.State.Phase=="Applying"||system.State.Phase=="Restoring")return;
+                Updates.StartInstall(pendingUpdate,!Visible);pendingUpdate=null;exiting=true;Close();
+            }catch(Exception error){pendingUpdate=null;updateStatus.Text="Установка отложена. Подробности в журнале.";Program.Log("Update install: "+error);}
+        }
         void Report(Exception error) { if(!preview)Program.Log(error.ToString()); Reveal(); MessageBox.Show(this,error.Message+"\n\nПодробности сохранены в журнале.","Open AntiLag: ошибка",MessageBoxButtons.OK,MessageBoxIcon.Error); }
         protected override void Dispose(bool disposing) { if(disposing) { poll.Dispose(); tray.Dispose(); engine.Dispose(); } base.Dispose(disposing); }
     }
 }
-
