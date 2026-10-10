@@ -18,7 +18,7 @@ namespace OpenAntiLag {
         readonly System.Windows.Forms.Timer poll;
         readonly Panel scroll=new Panel { Dock=DockStyle.Fill, AutoScroll=true };
         readonly TableLayoutPanel content=new TableLayoutPanel { AutoSize=true, AutoSizeMode=AutoSizeMode.GrowAndShrink, Dock=DockStyle.Top, ColumnCount=1, Margin=Padding.Empty };
-        bool busy, exiting, initializing=true, checkingUpdate;
+        bool gpuBusy, busy, exiting, initializing=true, checkingUpdate;
         readonly Label updateStatus=new Label();
         readonly OptionCard autoUpdate=new OptionCard {Compact=true};
         UpdatePackage pendingUpdate;
@@ -37,7 +37,7 @@ namespace OpenAntiLag {
             var header=new TableLayoutPanel { Dock=DockStyle.Fill, AutoSize=true, ColumnCount=2, Margin=new Padding(0,0,0,20) };
             header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100)); header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             header.Controls.Add(Label("Open AntiLag",24,Theme.Text,true),0,0);
-            var version=Label("v0.5.1",10,Theme.Muted,false); version.Anchor=AnchorStyles.Right; header.Controls.Add(version,1,0);
+            var version=Label("v0.5.5",10,Theme.Muted,false); version.Anchor=AnchorStyles.Right; header.Controls.Add(version,1,0);
             var subtitle=Label("Твой игровой профиль. Под контролем.",10,Theme.Muted,false); header.Controls.Add(subtitle,0,1); header.SetColumnSpan(subtitle,2); root.Controls.Add(header,0,0);
             var stateCard=new GradientCard { Dock=DockStyle.Fill, AutoSize=true, ColumnCount=1, BackColor=Theme.Background, Padding=new Padding(18,14,18,14), Margin=new Padding(0,0,0,20) };
             stateCard.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
@@ -68,7 +68,7 @@ namespace OpenAntiLag {
             startup.Text="Запускать с Windows"; startup.Dock=DockStyle.Fill; startup.Checked=!preview && Startup.Enabled; startup.Margin=Padding.Empty; footer.Controls.Add(startup,0,0);
             startup.CheckedChanged+=delegate { if(initializing||preview)return; try { Startup.Enabled=startup.Checked; } catch(Exception error) { initializing=true; startup.Checked=!startup.Checked; initializing=false; Report(error); } };
             footer.Controls.Add(Link("Журнал",delegate { if(!preview) { Directory.CreateDirectory(Program.DataDirectory); Process.Start("explorer.exe","\""+Program.DataDirectory+"\""); } }),1,0);
-            footer.Controls.Add(Link("О программе",delegate { MessageBox.Show(this,"Open AntiLag 0.5.1 • MIT\n\nИсходные значения сохраняются до изменений. Внешние изменения пользователя при откате сохраняются.\n\nПрофиль не гарантирует прирост FPS или нулевую задержку. Настройки Xbox зависят от версии Windows. Таймер 1 мс не является универсальной оптимизацией игр.\n\nСистемный профиль меняет таймеры BCD, запрашивает HAGS и задаёт приоритеты. Microsoft относит эти BCD-параметры к отладочным. Защита Windows не отключается.","Open AntiLag",MessageBoxButtons.OK,MessageBoxIcon.Information); }),2,0); root.Controls.Add(footer,0,4);
+            footer.Controls.Add(Link("О программе",delegate { MessageBox.Show(this,"Open AntiLag 0.5.5 • MIT\n\nИсходные значения сохраняются до изменений. Внешние изменения пользователя при откате сохраняются.\n\nПрофиль не гарантирует прирост FPS или нулевую задержку. Настройки Xbox зависят от версии Windows. Таймер 1 мс не является универсальной оптимизацией игр.\n\nСистемный профиль меняет таймеры BCD, запрашивает HAGS и задаёт приоритеты. Microsoft относит эти BCD-параметры к отладочным. Защита Windows не отключается.","Open AntiLag",MessageBoxButtons.OK,MessageBoxIcon.Information); }),2,0); root.Controls.Add(footer,0,4);
             autoUpdate.Text="Автообновления"; autoUpdate.Dock=DockStyle.Fill; autoUpdate.Margin=Padding.Empty;autoUpdate.Checked=preview||Updates.Enabled;
             footer.Controls.Add(autoUpdate,0,1);
             autoUpdate.CheckedChanged+=delegate {if(initializing||preview)return;try {Updates.Enabled=autoUpdate.Checked;if(!autoUpdate.Checked)pendingUpdate=null;}catch(Exception error){Report(error);} };
@@ -76,12 +76,15 @@ namespace OpenAntiLag {
             updateStatus.Text="Обновления из GitHub Releases";updateStatus.ForeColor=Theme.Muted;updateStatus.Font=new Font(Font.FontFamily,9);updateStatus.AutoSize=true;updateStatus.Dock=DockStyle.Fill;updateStatus.Margin=new Padding(0,2,0,0);footer.Controls.Add(updateStatus,0,2);footer.SetColumnSpan(updateStatus,3);
             var menu=new ContextMenuStrip { BackColor=Theme.Surface, ForeColor=Theme.Text };
             menu.Items.Add("Открыть",null,delegate { Reveal(); });
-            menu.Items.Add("Выход",null,delegate { if(busy)return; if(MessageBox.Show(this,"Выход не отключает профиль. Для отката сначала нажмите «Отключить».\n\nВыйти?","Open AntiLag",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)return; exiting=true; Close(); });
+            menu.Items.Add("Выход",null,delegate { if(busy||gpuBusy)return; if(MessageBox.Show(this,"Выход не отключает профиль. Для отката сначала нажмите «Отключить».\n\nВыйти?","Open AntiLag",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)return; exiting=true; Close(); });
             tray=new NotifyIcon { Icon=Icon,Text="Open AntiLag",ContextMenuStrip=menu,Visible=!preview }; tray.DoubleClick+=delegate { Reveal(); };
             FormClosing+=delegate(object sender,FormClosingEventArgs e) { if(!exiting && !preview && e.CloseReason==CloseReason.UserClosing) { e.Cancel=true; Hide(); } };
             Resize+=delegate { if(WindowState==FormWindowState.Minimized&&!preview)Hide(); };
             poll=new System.Windows.Forms.Timer { Interval=5000 }; poll.Tick+=async delegate { if(!busy&&Visible)await RefreshState(); if(!busy) {TryInstallUpdate(); if(Updates.Enabled&&DateTime.UtcNow>=nextUpdate)await CheckUpdate(false);} };
             Shown+=async delegate { if(startHidden)Hide(); busy=true; try { await Task.Run((Action)engine.Resume); } catch(Exception error) { Report(error); } finally { busy=false; } await RefreshState(); if(!preview) {poll.Start();if(Updates.Enabled)await CheckUpdate(false);} };
+            var tabs=new TabControl { Name="mainTabs", Dock=DockStyle.Fill };
+            var systemPage=new TabPage("Система") { BackColor=Theme.Background };
+            Controls.Remove(root); systemPage.Controls.Add(root); tabs.TabPages.Add(systemPage); tabs.TabPages.Add(new NvidiaPage(preview,delegate {if(busy||gpuBusy||exiting)return false;gpuBusy=true;return true;},delegate {gpuBusy=false;})); tabs.TabPages.Add(new AmdPage(preview,delegate {if(busy||gpuBusy||exiting)return false;gpuBusy=true;return true;},delegate {gpuBusy=false;})); Controls.Add(tabs);
             initializing=false;
         }
         protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); WindowTheme.Apply(Handle); }
@@ -93,7 +96,7 @@ namespace OpenAntiLag {
         void OptionsEnabled(bool value) { foreach(var box in new [] {gameMode,capture,mouse,cpu,pcie,timer})box.Enabled=value; }
         public void Reveal() { Show(); WindowState=FormWindowState.Normal; Activate(); }
         async Task ChangeProfile(bool on) {
-            if(busy)return;
+            if(busy||gpuBusy)return;
             if(on&&!preview&&Process.GetProcessesByName("68WAntiLagApp").Length>0) { MessageBox.Show(this,"Сначала закройте 68W AntiLag. Его прежние настройки Open AntiLag не отменяет.","Запущен другой AntiLag"); return; }
             busy=true; enable.Enabled=disable.Enabled=startup.Enabled=false; OptionsEnabled(false); status.Text=on?"Применение профиля…":"Восстановление…";
             var options=SelectedOptions();
@@ -102,7 +105,7 @@ namespace OpenAntiLag {
             await RefreshState();
         }
         public async Task RefreshState() {
-            if(busy)return; busy=true;
+            if(busy||gpuBusy)return; busy=true;
             try {
                 bool active=await Task.Run(delegate { return engine.IsActive; }); var machine=system.State;
                 bool off=engine.State.Phase=="Disabled"&&machine.Phase=="Disabled";
@@ -130,7 +133,7 @@ namespace OpenAntiLag {
             finally {checkingUpdate=false;}
         }
         void TryInstallUpdate() {
-            if(pendingUpdate==null||busy||exiting||IsDisposed)return;
+            if(pendingUpdate==null||busy||gpuBusy||exiting||IsDisposed)return;
             try {
                 if(engine.State.Phase=="Applying"||engine.State.Phase=="Restoring"||system.State.Phase=="Applying"||system.State.Phase=="Restoring")return;
                 Updates.StartInstall(pendingUpdate,!Visible);pendingUpdate=null;exiting=true;Close();
