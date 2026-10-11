@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -13,12 +14,13 @@ namespace OpenAntiLag {
         readonly bool preview, startHidden;
         readonly Label status=new Label(), detail=new Label();
         readonly OptionCard gameMode=new OptionCard(), capture=new OptionCard(), mouse=new OptionCard(), cpu=new OptionCard(), pcie=new OptionCard(), timer=new OptionCard(), startup=new OptionCard { Compact=true };
+        readonly OptionCard[] advanced=MachineSettings.Ids.Select(id=>new OptionCard {Name="advanced_"+id}).ToArray();
         readonly ProfileButton enable=new ProfileButton { Primary=true }, disable=new ProfileButton();
         readonly NotifyIcon tray;
         readonly System.Windows.Forms.Timer poll;
-        readonly Panel scroll=new Panel { Dock=DockStyle.Fill, AutoScroll=true };
+        readonly Panel scroll=new Panel { Name="profileOptionsScroll",Dock=DockStyle.Fill, AutoScroll=true };
         readonly TableLayoutPanel content=new TableLayoutPanel { AutoSize=true, AutoSizeMode=AutoSizeMode.GrowAndShrink, Dock=DockStyle.Top, ColumnCount=1, Margin=Padding.Empty };
-        bool gpuBusy, busy, exiting, initializing=true, checkingUpdate;
+        bool gpuBusy, busy, readingState, exiting, initializing=true, checkingUpdate;
         readonly Label updateStatus=new Label();
         readonly OptionCard autoUpdate=new OptionCard {Compact=true};
         UpdatePackage pendingUpdate;
@@ -36,7 +38,7 @@ namespace OpenAntiLag {
             var header=new TableLayoutPanel { Dock=DockStyle.Fill, AutoSize=true, ColumnCount=2, Margin=new Padding(0,0,0,20) };
             header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100)); header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             header.Controls.Add(Label("Open AntiLag",24,Theme.Text,true),0,0);
-            var version=Label("v0.6.0",10,Theme.Muted,false); version.Anchor=AnchorStyles.Right; header.Controls.Add(version,1,0);
+            var version=Label("v0.6.1",10,Theme.Muted,false); version.Anchor=AnchorStyles.Right; header.Controls.Add(version,1,0);
             var subtitle=Label("Твой игровой профиль. Под контролем.",10,Theme.Muted,false); header.Controls.Add(subtitle,0,1); header.SetColumnSpan(subtitle,2); root.Controls.Add(header,0,0);
             var stateCard=new GradientCard { Dock=DockStyle.Fill, AutoSize=true, ColumnCount=1, BackColor=Theme.Background, Padding=new Padding(18,14,18,14), Margin=new Padding(0,0,0,20) };
             stateCard.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
@@ -46,7 +48,7 @@ namespace OpenAntiLag {
             root.Controls.Add(scroll,0,2); scroll.Controls.Add(content); content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
             scroll.HandleCreated+=delegate { WindowTheme.Scrollbar(scroll.Handle); };
             var plan=Label("Профиль производительности",12,Theme.Text,true); plan.Margin=new Padding(0,0,0,6); content.Controls.Add(plan);
-            var powerNote=Label("Сохраняет текущие параметры питания и применяет выбранные опции.\nЗагрузчик Windows, HAGS и системные приоритеты не меняются.",10,Theme.Muted,false); powerNote.Margin=new Padding(0,0,0,16); content.Controls.Add(powerNote);
+            var powerNote=Label("Сохраняет текущие параметры питания и применяет выбранные опции.\nСистемные изменения — только по отдельным галочкам ниже.",10,Theme.Muted,false); powerNote.Margin=new Padding(0,0,0,16); content.Controls.Add(powerNote);
             var grid=new TableLayoutPanel { AutoSize=true, AutoSizeMode=AutoSizeMode.GrowAndShrink, Dock=DockStyle.Top, ColumnCount=2, Margin=Padding.Empty };
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,50)); grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,50));
             var options=engine.State.Phase=="Disabled" ? ProfileOptions.Gaming() : engine.State.Options;
@@ -57,6 +59,14 @@ namespace OpenAntiLag {
             AddOption(grid,pcie,"Питание PCIe","Отключить энергосбережение PCIe при питании от сети.",0,2,options.PcieReady);
             AddOption(grid,timer,"Таймер 1 мс","Эксперимент. Эффект в играх не гарантирован.",1,2,engine.State.TimerRequested); content.Controls.Add(grid);
             var note=Label("CPU, PCIe и таймер — дополнительные опции, по умолчанию выключены. Могут повысить нагрев и расход энергии. Прирост FPS не гарантирован.",9.5f,Theme.Muted,false); note.Margin=new Padding(0,2,0,12); content.Controls.Add(note);
+            var advancedTitle=Label("Дополнительные системные настройки",12,Theme.Text,true);advancedTitle.Margin=new Padding(0,12,0,8);content.Controls.Add(advancedTitle);
+            var advancedNote=Label("По умолчанию выключены. Нужны UAC и перезагрузка после изменения/отката. BCD — отладочные параметры: возможны сбои и проблемы загрузки. HAGS требует поддержки GPU и драйвера; запись значения не подтверждает активацию.",9.5f,Theme.Muted,false);advancedNote.Margin=new Padding(0,0,0,10);content.Controls.Add(advancedNote);
+            var advancedGrid=new TableLayoutPanel {AutoSize=true,AutoSizeMode=AutoSizeMode.GrowAndShrink,Dock=DockStyle.Top,ColumnCount=1,Margin=Padding.Empty};advancedGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
+            string[] titles={"BCD: автоматический источник часов","BCD: платформенный тик","BCD: отключить динамический тик","Включить HAGS","Приоритет активных приложений"};
+            string[] descriptions={"Удалить принудительный useplatformclock. Не отключает устройство HPET.","useplatformtick = yes. Экспериментальная отладочная настройка.","disabledynamictick = yes. Может увеличить расход энергии.","Аппаратное планирование GPU: HwSchMode = 2. После перезагрузки.","Win32PrioritySeparation = 42 (0x2A). Эффект зависит от нагрузки."};
+            var savedMachine=system.State;
+            for(int i=0;i<advanced.Length;i++){advancedGrid.RowStyles.Add(new RowStyle(SizeType.AutoSize));AddOption(advancedGrid,advanced[i],titles[i],descriptions[i],0,i,savedMachine.Version==2&&savedMachine.Phase!="Disabled"&&savedMachine.Entries.Any(x=>x.Id==MachineSettings.Ids[i]));advanced[i].Dock=DockStyle.Top;}
+            content.Controls.Add(advancedGrid);
             var actions=new TableLayoutPanel { Dock=DockStyle.Fill, AutoSize=true, ColumnCount=2, Margin=new Padding(0,16,0,12) };
             actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,50)); actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,50));
             StyleButton(enable,"Включить профиль"); StyleButton(disable,"Отключить"); enable.Name="enable"; disable.Name="disable"; enable.Margin=new Padding(0,0,6,0); disable.Margin=new Padding(6,0,0,0);
@@ -67,7 +77,7 @@ namespace OpenAntiLag {
             startup.Text="Запускать с Windows"; startup.Dock=DockStyle.Fill; startup.Checked=!preview && Startup.Enabled; startup.Margin=Padding.Empty; footer.Controls.Add(startup,0,0);
             startup.CheckedChanged+=delegate { if(initializing||preview)return; try { Startup.Enabled=startup.Checked; } catch(Exception error) { initializing=true; startup.Checked=!startup.Checked; initializing=false; Report(error); } };
             footer.Controls.Add(Link("Журнал",delegate { if(!preview) { Directory.CreateDirectory(Program.DataDirectory); Process.Start("explorer.exe","\""+Program.DataDirectory+"\""); } }),1,0);
-            footer.Controls.Add(Link("О программе",delegate { MessageBox.Show(this,"Open AntiLag 0.6.0 • MIT\nМодуль шейдеров: отдельный SCSKiller 1.2.5, GPL-3.0-or-later и исключения.\nhttps://github.com/BlueHeisenberg/SCSKiller\n\nИсходные значения сохраняются до изменений. Внешние изменения пользователя при откате сохраняются.\n\nПрофиль не гарантирует прирост FPS или нулевую задержку. Настройки Xbox зависят от версии Windows. Таймер 1 мс не является универсальной оптимизацией игр.\n\nНовые изменения BCD, HAGS и системных приоритетов отключены. Старые профили можно восстановить. Питание копируется из текущего плана; дополнительные опции требуют отдельного выбора.","Open AntiLag",MessageBoxButtons.OK,MessageBoxIcon.Information); }),2,0); root.Controls.Add(footer,0,4);
+            footer.Controls.Add(Link("О программе",delegate { MessageBox.Show(this,"Open AntiLag 0.6.1 • MIT\nМодуль шейдеров: отдельный SCSKiller 1.2.5, GPL-3.0-or-later и исключения.\nhttps://github.com/BlueHeisenberg/SCSKiller\n\nИсходные значения сохраняются до изменений. Внешние изменения пользователя при откате сохраняются.\n\nПрофиль не гарантирует прирост FPS или нулевую задержку. Настройки Xbox зависят от версии Windows. Таймер 1 мс не является универсальной оптимизацией игр.\n\nBCD, HAGS и системные приоритеты доступны по отдельным галочкам, выключенным по умолчанию. Требуют UAC и перезагрузки. Старые профили можно восстановить. Питание копируется из текущего плана; дополнительные опции требуют отдельного выбора.","Open AntiLag",MessageBoxButtons.OK,MessageBoxIcon.Information); }),2,0); root.Controls.Add(footer,0,4);
             autoUpdate.Text="Автообновления"; autoUpdate.Dock=DockStyle.Fill; autoUpdate.Margin=Padding.Empty;autoUpdate.Checked=preview||Updates.Enabled;
             footer.Controls.Add(autoUpdate,0,1);
             autoUpdate.CheckedChanged+=delegate {if(initializing||preview)return;try {Updates.Enabled=autoUpdate.Checked;if(!autoUpdate.Checked)pendingUpdate=null;}catch(Exception error){Report(error);} };
@@ -83,46 +93,49 @@ namespace OpenAntiLag {
             Shown+=async delegate { if(startHidden)Hide(); busy=true; try { await Task.Run((Action)controller.Resume); } catch(Exception error) { Report(error); } finally { busy=false; } await RefreshState(); if(!preview) {if(disable.Text=="Восстановить")Reveal();poll.Start();if(Updates.Enabled)await CheckUpdate(false);} };
             var tabs=new ThemedTabs { Name="mainTabs", Dock=DockStyle.Fill };
             var systemPage=new TabPage("Система") { BackColor=Theme.Background };
-            Controls.Remove(root); systemPage.Controls.Add(root); tabs.TabPages.Add(systemPage); tabs.TabPages.Add(new NvidiaPage(preview,delegate {if(busy||gpuBusy||exiting)return false;gpuBusy=true;return true;},delegate {gpuBusy=false;})); tabs.TabPages.Add(new AmdPage(preview,delegate {if(busy||gpuBusy||exiting)return false;gpuBusy=true;return true;},delegate {gpuBusy=false;})); Controls.Add(tabs);
-            tabs.TabPages.Add(new ShaderPage(preview,delegate {if(busy||gpuBusy||exiting)return false;gpuBusy=true;return true;},delegate {gpuBusy=false;}));
+            Controls.Remove(root); systemPage.Controls.Add(root); tabs.TabPages.Add(systemPage); tabs.TabPages.Add(new NvidiaPage(preview,TryAcquireGpu,ReleaseGpu)); tabs.TabPages.Add(new AmdPage(preview,TryAcquireGpu,ReleaseGpu)); Controls.Add(tabs);
+            tabs.TabPages.Add(new ShaderPage(preview,TryAcquireGpu,ReleaseGpu));
             initializing=false;
         }
+        internal bool TryAcquireGpu() {if((busy&&!readingState)||gpuBusy||exiting)return false;gpuBusy=true;return true;}
+        internal void ReleaseGpu() {gpuBusy=false;}
         protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); WindowTheme.Apply(Handle); }
         static Label Label(string text,float size,Color color,bool bold) { return new Label { Text=text,AutoSize=true,Dock=DockStyle.Fill,ForeColor=color,Font=new Font("Segoe UI",size,bold ? FontStyle.Bold : FontStyle.Regular),Margin=Padding.Empty }; }
         static LinkLabel Link(string text,Action action) { var link=new LinkLabel { Text=text,AutoSize=true,Anchor=AnchorStyles.Right,LinkColor=Theme.Muted,ActiveLinkColor=Theme.Text,VisitedLinkColor=Theme.Muted,LinkBehavior=LinkBehavior.HoverUnderline,Margin=new Padding(16,6,0,6) }; link.LinkClicked+=delegate { action(); }; return link; }
         void AddOption(TableLayoutPanel grid,OptionCard box,string title,string description,int col,int row,bool value) { box.Text=title; box.Description=description; box.Checked=value; box.Dock=DockStyle.Fill; box.Margin=new Padding(col==0?0:6,0,col==0?6:0,12); box.AccessibleDescription=description; grid.Controls.Add(box,col,row); }
         void StyleButton(ProfileButton b,string text) { b.Text=text; b.Dock=DockStyle.Fill; b.Height=50; b.Font=new Font(Font.FontFamily,11,FontStyle.Bold); }
         ProfileOptions SelectedOptions() { return new ProfileOptions { GameMode=gameMode.Checked,DisableCapture=capture.Checked,DisableMouseAcceleration=mouse.Checked,CpuReady=cpu.Checked,PcieReady=pcie.Checked,Timer=timer.Checked }; }
-        void OptionsEnabled(bool value) { foreach(var box in new [] {gameMode,capture,mouse,cpu,pcie,timer})box.Enabled=value; }
+        void OptionsEnabled(bool value) { foreach(var box in new [] {gameMode,capture,mouse,cpu,pcie,timer}.Concat(advanced))box.Enabled=value; }
         public void Reveal() { Show(); WindowState=FormWindowState.Normal; Activate(); }
         async Task ChangeProfile(bool on) {
             if(busy||gpuBusy)return;
             if(on&&!preview&&Process.GetProcessesByName("68WAntiLagApp").Length>0) { MessageBox.Show(this,"Сначала закройте 68W AntiLag. Его прежние настройки Open AntiLag не отменяет.","Запущен другой AntiLag"); return; }
             busy=true; enable.Enabled=disable.Enabled=startup.Enabled=false; OptionsEnabled(false); status.Text=on?"Применение профиля…":"Восстановление…";
-            var options=SelectedOptions();
-            try { await Task.Run(delegate { if(on)controller.Enable(options); else controller.Disable(); }); if(!preview)Program.Log(on?"Enabled user profile; no BCD/HAGS/priority writes":"Restored profile"); }
+            var options=SelectedOptions();var selected=advanced.Select((box,i)=>new {box,i}).Where(x=>x.box.Checked).Select(x=>MachineSettings.Ids[x.i]).ToArray();
+            try { await Task.Run(delegate { if(on)controller.Enable(options,selected); else controller.Disable(); }); if(!preview)Program.Log(on?"Enabled profile; selected system settings: "+String.Join(",",selected):"Restored profile"); }
             catch(Exception error) { Report(error); } finally { busy=false; }
-            if(!on && engine.State.Phase=="Disabled") {
+            if(!on && engine.State.Phase=="Disabled" && system.State.Phase=="Disabled") {
                 var defaults=ProfileOptions.Gaming();
                 gameMode.Checked=defaults.GameMode;capture.Checked=defaults.DisableCapture;mouse.Checked=defaults.DisableMouseAcceleration;
-                cpu.Checked=pcie.Checked=timer.Checked=false;
+                cpu.Checked=pcie.Checked=timer.Checked=false;foreach(var box in advanced)box.Checked=false;
             }
             await RefreshState();
         }
         public async Task RefreshState() {
-            if(busy||gpuBusy)return; busy=true;
+            if(busy||gpuBusy)return; busy=true;readingState=true;bool restoreAvailable=engine.State.Phase!="Disabled";
             try {
-                bool active=await Task.Run(delegate { return engine.IsActive; }); var machine=system.State;
+                var machine=system.State;restoreAvailable|=machine.Phase!="Disabled";
+                bool active=await Task.Run(delegate { return engine.IsActive; });
                 bool off=engine.State.Phase=="Disabled"&&machine.Phase=="Disabled";
-                bool legacy=machine.Phase!="Disabled" || (engine.State.Phase!="Disabled" && engine.State.SchemaVersion<3);
-                bool recovery=legacy || (!off && engine.State.Phase!="Enabled");
+                bool legacy=(machine.Phase!="Disabled"&&machine.Version==1) || (engine.State.Phase!="Disabled" && engine.State.SchemaVersion<3);
+                bool recovery=legacy || (!off && engine.State.Phase!="Enabled") || (machine.Phase!="Disabled"&&machine.Phase!="Enabled");
                 bool reboot=system.RebootPending;
                 status.Text=legacy?"Восстановите старый профиль":recovery?"Нужно восстановление":reboot?"Нужна перезагрузка ПК":off?"Готов к включению":active?"Профиль включён":"Часть настроек изменена";
-                detail.Text=legacy?"Сохранён профиль прошлой версии. Нажмите «Восстановить». Для системных изменений потребуются права администратора и перезагрузка.":recovery?"Операция не завершена. Нажмите «Восстановить».":reboot?"Исходные системные значения восстановлены. Перед включением нового профиля перезагрузите Windows.":off?"Базовый профиль сохраняет параметры питания. Новые изменения BCD, HAGS и системных приоритетов отключены.":active?"Выбранные опции применены. Системные параметры загрузки не менялись.":"При восстановлении ваш внешний выбор будет сохранён.";
+                detail.Text=legacy?"Сохранён профиль прошлой версии. Нажмите «Восстановить». Для системных изменений потребуются права администратора и перезагрузка.":recovery?"Операция не завершена. Нажмите «Восстановить».":reboot?"Системные параметры изменены. Для вступления изменений в силу перезагрузите Windows.":off?"Базовый профиль сохраняет параметры питания. Дополнительные системные параметры меняются только по выбранным галочкам.":active?"Выбранные опции применены. Исходные значения сохранены для восстановления.":"При восстановлении ваш внешний выбор будет сохранён.";
                 enable.Enabled=off&&!reboot; disable.Enabled=!off; disable.Text=recovery?"Восстановить":"Отключить"; OptionsEnabled(off&&!reboot); startup.Enabled=true;
                 tray.Text="Open AntiLag — "+(active?"включён":off?"выключен":"проверить состояние");
-            } catch(Exception error) { status.Text="Ошибка проверки"; detail.Text=error.Message; enable.Enabled=false; disable.Enabled=engine.State.Phase!="Disabled"; }
-            finally { busy=false; }
+            } catch(Exception error) { status.Text="Ошибка проверки"; detail.Text=error.Message; enable.Enabled=false; disable.Enabled=restoreAvailable; }
+            finally { readingState=false;busy=false; }
         }
         async Task CheckUpdate(bool manual) {
             if(checkingUpdate||exiting||IsDisposed)return;

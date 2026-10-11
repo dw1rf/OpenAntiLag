@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.IO;
 using System.Threading.Tasks;
@@ -17,7 +17,7 @@ namespace OpenAntiLag {
         readonly Func<bool> acquire;
         readonly Action release;
         readonly bool preview, logOperations;
-        bool running,loaded;
+        bool running;
         public NvidiaPage(bool preview,Func<bool> acquire,Action release,NvidiaController controller=null):base("NVIDIA · Глобальные") {
             this.preview=preview;this.acquire=acquire;this.release=release;logOperations=controller==null&&!preview;
             this.controller=controller??new NvidiaController(()=>new NvidiaDriver(),new NvidiaStore(Path.Combine(Program.DataDirectory,"nvidia-backup.xml")));
@@ -30,6 +30,7 @@ namespace OpenAntiLag {
             var cap=new FlowLayoutPanel {AutoSize=true,Dock=DockStyle.Top};
             cap.Controls.Add(new Label {Text="FPS для G-SYNC (ниже герцовки):",AutoSize=true,Margin=new Padding(0,6,6,0)});cap.Controls.Add(fps);
             options.Controls.Add(cap);options.Controls.Add(power);options.Controls.Add(quality);
+            body.HandleCreated+=delegate{WindowTheme.Scrollbar(body.Handle);};status.HandleCreated+=delegate{WindowTheme.Scrollbar(status.Handle);};
             body.BackColor=status.BackColor=Theme.Background;body.ForeColor=status.ForeColor=Theme.Text;
             body.Margin=new Padding(0,12,0,12);status.Margin=new Padding(0,8,0,4);
             var actions=new TableLayoutPanel {AutoSize=true,Dock=DockStyle.Fill,ColumnCount=2};
@@ -41,7 +42,6 @@ namespace OpenAntiLag {
             apply.Click+=async delegate {await Run(1);};restore.Click+=async delegate {await Run(2);};read.Click+=async delegate {await Run(0);};
             status.Text=preview?"Предпросмотр. Запись в драйвер отключена.":"Применение и восстановление меняют только глобальные параметры NVIDIA. Закройте игры перед применением.";
             apply.Enabled=restore.Enabled=read.Enabled=!preview;UpdatePlan();
-            VisibleChanged+=async delegate {if(Visible&&!loaded&&!preview){loaded=true;await Run(0);}};
         }
         void UpdatePlan() {
             fps.Enabled=!running&&mode.SelectedIndex==1;

@@ -29,7 +29,8 @@ namespace OpenAntiLag {
             games.Columns.Add("Игра",250);games.Columns.Add("Состояние",180);games.Columns.Add("Причина / сведения",400);games.Margin=new Padding(0,12,0,12);root.Controls.Add(games,0,3);
             games.OwnerDraw=true;
             games.DrawColumnHeader+=delegate(object sender,DrawListViewColumnHeaderEventArgs e){using(var brush=new SolidBrush(Theme.Surface))e.Graphics.FillRectangle(brush,e.Bounds);TextRenderer.DrawText(e.Graphics,e.Header.Text,games.Font,Rectangle.Inflate(e.Bounds,-6,0),Theme.Muted,TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis);};
-            games.DrawSubItem+=delegate(object sender,DrawListViewSubItemEventArgs e){using(var brush=new SolidBrush(e.Item.Selected?Theme.Selected:Theme.Surface))e.Graphics.FillRectangle(brush,e.Bounds);TextRenderer.DrawText(e.Graphics,e.SubItem.Text,games.Font,Rectangle.Inflate(e.Bounds,-6,0),Theme.Text,TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis|TextFormatFlags.NoPrefix);};
+            games.DrawItem+=delegate(object sender,DrawListViewItemEventArgs e){if(games.View!=View.Details)e.DrawDefault=true;};
+            games.DrawSubItem+=delegate(object sender,DrawListViewSubItemEventArgs e){using(var brush=new SolidBrush(e.Item.Selected?Theme.Accent:Theme.Surface))e.Graphics.FillRectangle(brush,e.Bounds);TextRenderer.DrawText(e.Graphics,e.SubItem.Text,games.Font,Rectangle.Inflate(e.Bounds,-6,0),Theme.Text,TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis|TextFormatFlags.NoPrefix);};
             games.HandleCreated+=delegate{WindowTheme.Scrollbar(games.Handle);};output.HandleCreated+=delegate{WindowTheme.Scrollbar(output.Handle);};
             root.Controls.Add(Buttons(compile,details,stop),0,4);root.Controls.Add(progress,0,5);output.Margin=new Padding(0,12,0,8);root.Controls.Add(output,0,6);root.Controls.Add(status,0,7);Controls.Add(root);
             install.Click+=async delegate {await Work(async ct=>{await this.engine.Install(Log,ct);},"Загрузка официального модуля…");};
@@ -41,7 +42,8 @@ namespace OpenAntiLag {
                 await Work(async ct=>{foreach(var game in selected){ct.ThrowIfCancellationRequested();Log("Подготовка: "+game.Name);await this.run("queue",game.Id,Log,ct);}var text=await this.run("scan",null,Log,ct);ShowGames(ShaderProtocol.Games(text));},"Подготовка шейдеров. Можно остановить; завершение текущих операций займёт время…");
             };
             stop.Click+=delegate {if(cancellation!=null){stop.Enabled=false;status.Text="Остановка: ждём завершения текущих операций и записи кэша…";cancellation.Cancel();}};
-            games.SelectedIndexChanged+=delegate {UpdateButtons();};
+            games.SelectedIndexChanged+=delegate {games.Invalidate();UpdateButtons();};
+            games.GotFocus+=delegate{games.Invalidate();};games.LostFocus+=delegate{games.Invalidate();};
             if(preview){ShowGames(new List<ShaderGame>{new ShaderGame {Id="steam:example",Name="Пример игры — предпросмотр",Status="Ready",Reason="Здесь появятся найденные игры и состояние шейдеров."}});}
             status.Text=this.engine.Installed?"Модуль установлен. Нажмите «Найти игры».":"Модуль SCSKiller "+ShaderEngine.Version+": загрузка около 120 МБ с проверкой SHA-256. Интернет нужен для загрузки.";
             UpdateButtons();
@@ -57,7 +59,7 @@ namespace OpenAntiLag {
         }
         void UpdateButtons() {
             bool ready=!preview&&!running&&(engine.Installed||run.Target!=engine);var selected=Selected();
-            install.Enabled=!preview&&!running&&!engine.Installed;scan.Enabled=cache.Enabled=ready;details.Enabled=ready&&selected.Count==1;compile.Enabled=ready&&selected.Count>0&&selected.All(x=>x.CanCompile);stop.Enabled=running;games.Enabled=!running;
+            install.Enabled=!preview&&!running&&!engine.Installed;scan.Enabled=cache.Enabled=ready;details.Enabled=ready&&selected.Count==1;compile.Enabled=ready&&selected.Count>0&&selected.All(x=>x.CanCompile);compile.Text=selected.Count>0?"Подготовить ("+selected.Count+")":"Подготовить";stop.Enabled=running;games.Enabled=!running;
         }
         void Log(string line) {
             if(IsDisposed||Disposing||!IsHandleCreated)return;

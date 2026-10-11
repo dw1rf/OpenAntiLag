@@ -11,11 +11,12 @@ namespace OpenAntiLag {
         public readonly Dictionary<string,int?> Values=new Dictionary<string,int?> { {"useplatformclock",1},{"useplatformtick",null},{"disabledynamictick",0},{"hags",1},{"priority",38} };
         public string Fail;
         public bool Block, Ignore;
-        public int Writes;
-        public string BootEntry(){return Entry;}
+        public int Writes, BootReads;
+        public readonly List<string> Reads=new List<string>();
+        public string BootEntry(){BootReads++;return Entry;}
         public string BootSession(){return Boot;}
         public void Preflight(bool changes){if(Block&&changes)throw new InvalidOperationException("BitLocker blocked");}
-        public int? Read(string id,string entry){return Values[id];}
+        public int? Read(string id,string entry){Reads.Add(id);return Values[id];}
         public void Write(string id,string entry,int? value){Writes++;if(!Ignore)Values[id]=value;if(Fail==id){Fail=null;throw new IOException("Injected failure "+id);}}
     }
     public sealed class MemoryMachineStore : IMachineStore {
@@ -25,10 +26,11 @@ namespace OpenAntiLag {
         public MachineState Load(){return Copy(state);}
         public void Save(MachineState value){if(Fail)throw new IOException("Disk full");state=Copy(value);}
     }
-    public sealed class TestSystemClient : ISystemClient {
+    public sealed class TestSystemClient : IAdvancedSystemClient {
         public MachineState Value=new MachineState();
         public bool CancelDisable,FailDisable,Pending;
-        public int DisableCalls;
+        public int DisableCalls;public string[] Selected;public bool CancelEnable;
+        public void EnableSelected(string[] ids){if(CancelEnable)throw new OperationCanceledException();Selected=ids;Value.Version=2;Value.Phase="Enabled";}
         public MachineState State {get{return Value;}}
         public bool RebootPending {get{return Pending;}}
         public void Disable(){DisableCalls++;if(CancelDisable)throw new OperationCanceledException();if(FailDisable)throw new IOException("System restore failed");Value.Phase="Disabled";}
@@ -71,6 +73,23 @@ namespace OpenAntiLag {
             Test("Startup blocks timer with pending machine migration",delegate {foreach(bool pending in new[]{false,true}) {var h=new FakeHost();var s=new MemoryStore();using(var e=new Engine(h,s)){e.Enable(true);}var system=new TestSystemClient {Pending=pending};if(!pending)system.Value.Phase="Enabled";using(var e=new Engine(h,s)){new ProfileController(e,system).Resume();Check(!h.Timer,"Timer resumed during migration");}}});
             Test("Safe opt-in timer resumes without machine writes",delegate {var h=new FakeHost();var s=new MemoryStore();using(var e=new Engine(h,s)){e.Enable(true);}using(var e=new Engine(h,s)){var system=new TestSystemClient();new ProfileController(e,system).Resume();Check(h.Timer&&system.DisableCalls==0,"Safe timer did not resume");}});
             Test("Safe profile state survives XML roundtrip",delegate {string dir=Path.Combine(Path.GetTempPath(),"OpenAntiLag-safe-"+Guid.NewGuid());try {var s=new XmlStateStore(Path.Combine(dir,"state.xml"));var h=new FakeHost();using(var e=new Engine(h,s)){new ProfileController(e,new TestSystemClient()).Enable(ProfileOptions.Gaming());}using(var e=new Engine(h,s)){Check(e.State.SchemaVersion==3&&e.IsActive,"Safe schema unreadable");new ProfileController(e,new TestSystemClient()).Disable();Check(h.Current==FakeHost.Original,"Restore failed");}}finally {if(Directory.Exists(dir))Directory.Delete(dir,true);}});
+            Test("Every explicit system subset changes only selected entries and restores",delegate {
+                for(int mask=0;mask<32;mask++) {var h=new FakeMachineHost();var store=new MemoryMachineStore();var ids=MachineSettings.Ids.Where((id,i)=>(mask&(1<<i))!=0).ToArray();
+                    var engine=new MachineEngine(h,store,"owner");engine.EnableSelected(ids);
+                    Check(h.Reads.All(id=>ids.Contains(id)),"Unselected setting read");
+                    foreach(string id in ids)Check(h.Values[id]==MachineSettings.Target(id),"Selected value missing");
+                    if(ids.Length>0)Check(store.Load().Version==2&&store.Load().Entries.Count==ids.Length,"Incomplete subset journal");
+                    new MachineEngine(h,store,"owner").Disable();Originals(h);
+                }
+            });
+            Test("HAGS-only apply and rollback do not access BCD or BitLocker",delegate {var h=new FakeMachineHost {Block=true};var s=new MemoryMachineStore();var e=new MachineEngine(h,s,"owner");e.EnableSelected(new[]{"hags"});e.Disable();Check(h.BootReads==0&&h.Reads.All(id=>id=="hags"),"HAGS touched BCD");Originals(h);});
+            Test("Selected system journal failure and invalid selection have no writes",delegate {var h=new FakeMachineHost();var s=new MemoryMachineStore {Fail=true};var e=new MachineEngine(h,s,"owner");Throws(()=>e.EnableSelected(new[]{"hags"}));Check(h.Writes==0,"Write before backup");foreach(var ids in new[]{new[]{"hags","hags"},new[]{"invalid"}})Throws(()=>e.EnableSelected(ids));Check(h.Writes==0,"Invalid request wrote settings");});
+            Test("Selected BCD blocked by BitLocker before writes",delegate {var h=new FakeMachineHost {Block=true};var s=new MemoryMachineStore();Throws(()=>new MachineEngine(h,s,"owner").EnableSelected(new[]{"useplatformtick"}));Check(h.Writes==0&&s.Load().Phase=="Disabled","BitLocker ignored");});
+            Test("Each selected system write failure rolls back exact originals",delegate {foreach(string id in MachineSettings.Ids){var h=new FakeMachineHost {Fail=id};var s=new MemoryMachineStore();Throws(()=>new MachineEngine(h,s,"owner").EnableSelected(MachineSettings.Ids));Originals(h);Check(s.Load().Phase=="Disabled","Rollback unfinished");}});
+            Test("Selected system silent rejection detected and restored",delegate {var h=new FakeMachineHost {Ignore=true};var s=new MemoryMachineStore();Throws(()=>new MachineEngine(h,s,"owner").EnableSelected(new[]{"hags"}));Originals(h);Check(s.Load().Phase=="Disabled","Silent rejection lost recovery");});
+            Test("Selected system preserves external changes and absent originals",delegate {var h=new FakeMachineHost();h.Values["hags"]=null;var s=new MemoryMachineStore();var e=new MachineEngine(h,s,"owner");e.EnableSelected(new[]{"hags","priority"});h.Values["priority"]=7;e.Disable();Check(h.Values["hags"]==null&&h.Values["priority"]==7,"External or absent value lost");});
+            Test("Repeated selected enable preserves original journal and reboot gate",delegate {var h=new FakeMachineHost();var s=new MemoryMachineStore();var e=new MachineEngine(h,s,"owner");e.EnableSelected(new[]{"hags"});Throws(()=>e.EnableSelected(new[]{"priority"}));Check(s.Load().Entries.Count==1&&s.Load().Entries[0].Original==1,"Backup replaced");e.Disable();Throws(()=>e.EnableSelected(new[]{"priority"}));h.Boot="boot-2";e.EnableSelected(new[]{"priority"});e.Disable();Originals(h);});
+            Test("Controller cancels before user writes and restores system on user failure",delegate {var h=new FakeHost();var system=new TestSystemClient {CancelEnable=true};using(var e=new Engine(h,new MemoryStore())){Throws(()=>new ProfileController(e,system).Enable(ProfileOptions.Gaming(),new[]{"hags"}));Check(h.Writes==0,"Cancelled UAC wrote user settings");system.CancelEnable=false;h.Fail="create";Throws(()=>new ProfileController(e,system).Enable(ProfileOptions.Gaming(),new[]{"hags"}));Check(system.Selected.SequenceEqual(new[]{"hags"})&&system.DisableCalls==1&&system.State.Phase=="Disabled","System not rolled back");}});
             return count;
         }
     }

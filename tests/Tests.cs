@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
@@ -18,7 +18,8 @@ namespace OpenAntiLag {
         public string CopiedFrom;
         public readonly Dictionary<string, int[]> Values = new Dictionary<string, int[]> { { "game-mode", new [] { 0 } }, { "capture-app", new [] { 1 } }, { "mouse-acceleration", new [] { 6, 10, 1 } } };
         public bool IgnoreWrite;
-        public string ActivePlan() { return Current; }
+        public Action BeforeActivePlan;
+        public string ActivePlan() { if(BeforeActivePlan!=null)BeforeActivePlan();return Current; }
         public bool HasPlan(string id) { return Plans.Contains(id); }
         void Check(string action) { if (Fail == action) { Fail = null; throw new IOException("Injected failure: " + action); } }
         public void CreatePlan(string id, string source) { if(!Plans.Contains(source))throw new IOException("Missing source plan");CopiedFrom=source;Writes++; Plans.Add(id); Check("create"); }
@@ -77,6 +78,7 @@ namespace OpenAntiLag {
                 if(args.Length > 2 && args[2] == "active") e.Enable(new ProfileOptions { GameMode=true, DisableCapture=true, DisableMouseAcceleration=true, CpuReady=true, PcieReady=true, Timer=true });
                 using (var f = new MainForm(e, false, true)) {
                     if(args.Length > 2 && (args[2] == "small"||args[2]=="shaders-small")) f.ClientSize = new Size(630,560);
+                    if(args.Length>2&&args[2]=="advanced")f.ClientSize=new Size(800,1400);
                     if(args.Length > 3) {
                         float scale=float.Parse(args[3],System.Globalization.CultureInfo.InvariantCulture);
                         var fonts=new Dictionary<Control,Font>(); CaptureFonts(f,fonts);
@@ -89,6 +91,8 @@ namespace OpenAntiLag {
                     var tick = new System.Windows.Forms.Timer { Interval = 600 };
                     tick.Tick += delegate {
                         tick.Stop();
+                        if(args.Length>2&&args[2]=="advanced")((Panel)f.Controls.Find("profileOptionsScroll",true)[0]).AutoScrollPosition=new Point(0,10000);
+                        if(args.Length>2&&args[2].StartsWith("shaders")){var list=(ListView)f.Controls.Find("shaderGames",true)[0];list.Items[0].Selected=true;list.Refresh();}
                         Console.WriteLine(WindowTheme.Inspect(f.Handle));
                         using (var bmp = new Bitmap(f.ClientSize.Width, f.ClientSize.Height)) { f.Controls[0].DrawToBitmap(bmp, new Rectangle(Point.Empty, f.ClientSize)); bmp.Save(args[1], System.Drawing.Imaging.ImageFormat.Png); }
                         CheckLayout(f);
@@ -137,11 +141,14 @@ namespace OpenAntiLag {
                     try {
                         var on=(Button)form.Controls.Find("enable",true)[0]; var off=(Button)form.Controls.Find("disable",true)[0];
                         await WaitUntil(delegate { return on.Enabled; });
+                        Assert(form.Controls.Find("advanced_hags",true).Length==1&&!((OptionCard)form.Controls.Find("advanced_hags",true)[0]).Checked,"HAGS opt-in missing or checked by default");
                         CheckLayout(form); on.PerformClick();
                         await WaitUntil(delegate { return engine.State.Phase=="Enabled" && off.Enabled; });
                         Assert(!FindLabels(form).Any(x=>x.Text=="Нужно восстановление"||x.Text=="Нужна перезагрузка ПК"),"Safe profile incorrectly needs system recovery");
                         Assert(!on.Enabled,"Enable should be disabled when active"); CheckLayout(form); off.PerformClick();
                         await WaitUntil(delegate { return engine.State.Phase=="Disabled" && on.Enabled; });
+                        var hagsOption=(OptionCard)form.Controls.Find("advanced_hags",true)[0];hagsOption.Checked=true;on.PerformClick();await WaitUntil(()=>off.Enabled);
+                        Assert(off.Text=="Отключить"&&!FindLabels(form).Any(x=>x.Text=="Восстановите старый профиль"),"New selected profile classified as legacy");off.PerformClick();await WaitUntil(()=>on.Enabled);Assert(!hagsOption.Checked,"HAGS checkbox not reset after restore");
                         form.ClientSize=new Size(630,560); form.PerformLayout(); CheckLayout(form);
                         Assert(on.Bottom<=on.Parent.ClientSize.Height && off.Enabled==false,"Action state/layout invalid");
                         var tabs=(TabControl)form.Controls.Find("mainTabs",true)[0];
@@ -156,7 +163,7 @@ namespace OpenAntiLag {
                         tabs.TabPages.Remove(gpuPage);gpuPage.Dispose();
                         var amdDriver=new FakeAmd();var amdStore=new MemoryAmd();var amdPage=new AmdPage(false,()=>true,()=>{},new AmdProfiles(()=>amdDriver,amdStore));tabs.TabPages.Add(amdPage);tabs.SelectedTab=amdPage;
                         var amdApply=(Button)amdPage.Controls.Find("applyAmd",true)[0];var amdRestore=(Button)amdPage.Controls.Find("restoreAmd",true)[0];
-                        await WaitUntil(()=>amdApply.Enabled);amdApply.PerformClick();await WaitUntil(()=>amdApply.Enabled);Assert(amdStore.Load()!=null&&amdStore.Load().Phase=="Applied","AMD UI apply failed");
+                        ((Button)amdPage.Controls.Find("readAmd",true)[0]).PerformClick();await WaitUntil(()=>amdApply.Enabled);amdApply.PerformClick();await WaitUntil(()=>amdApply.Enabled);Assert(amdStore.Load()!=null&&amdStore.Load().Phase=="Applied","AMD UI apply failed");
                         amdRestore.PerformClick();await WaitUntil(()=>amdRestore.Enabled);Assert(amdStore.Load()==null&&amdDriver.Values["chill"]==1,"AMD UI restore failed");tabs.TabPages.Remove(amdPage);amdPage.Dispose();
                         using(var legacyEngine=new Engine(new FakeHost(),new MemoryStore())) {
                             legacyEngine.Enable(new ProfileOptions {CpuReady=true,PcieReady=true,Timer=true});
@@ -188,6 +195,9 @@ namespace OpenAntiLag {
                             var shaderScan=(Button)shaderPage.Controls.Find("scanShaders",true)[0];var shaderCompile=(Button)shaderPage.Controls.Find("compileShaders",true)[0];var shaderStop=(Button)shaderPage.Controls.Find("stopShaders",true)[0];var shaderGames=(ListView)shaderPage.Controls.Find("shaderGames",true)[0];
                             shaderScan.PerformClick();await WaitUntil(()=>shaderGames.Items.Count==4&&!shaderLocked);
                             shaderGames.Items[1].Selected=true;Assert(!shaderCompile.Enabled,"Recording-only game can compile");shaderGames.Items[1].Selected=false;shaderGames.Items[0].Selected=true;
+                            Assert(shaderCompile.Enabled&&shaderCompile.Text.Contains("(1)"),"Selection count not shown");
+                            shaderCompile.Focus();shaderGames.Refresh();
+                            using(var bitmap=new Bitmap(shaderGames.Width,shaderGames.Height)){shaderGames.DrawToBitmap(bitmap,shaderGames.ClientRectangle);var row=shaderGames.Items[0].Bounds;Assert(bitmap.GetPixel(row.Left+2,row.Top+row.Height/2).ToArgb()==Theme.Accent.ToArgb(),"Selected row not visible without focus");}
                             Assert(shaderCompile.Enabled,"Ready game cannot compile");shaderCompile.PerformClick();await WaitUntil(()=>compileCalls==1&&!shaderLocked);
                             shaderGames.Items[0].Selected=true;waitForStop=true;shaderCompile.PerformClick();await WaitUntil(()=>shaderStop.Enabled&&shaderLocked);
                             Assert(!shaderScan.Enabled,"Scan enabled during compile");shaderStop.PerformClick();await WaitUntil(()=>!shaderLocked&&shaderCompile.Enabled);
@@ -195,6 +205,17 @@ namespace OpenAntiLag {
                             CheckLayout(shaderPage);tabs.TabPages.Remove(shaderPage);
                         }
                         Console.WriteLine("PASS UI: shader scan, unsupported game guard, compile, shared operation lock and cancellation");
+                        var slowHost=new FakeHost();using(var slowEngine=new Engine(slowHost,new MemoryStore()))using(var slowForm=new MainForm(slowEngine,false,true)) {
+                            slowEngine.Enable(ProfileOptions.Gaming());slowForm.Show();await Task.Delay(100);await slowForm.RefreshState();
+                            using(var entered=new System.Threading.ManualResetEventSlim())using(var finish=new System.Threading.ManualResetEventSlim()) {
+                                slowHost.BeforeActivePlan=()=>{entered.Set();finish.Wait(5000);};var refresh=slowForm.RefreshState();
+                                try {await WaitUntil(()=>entered.IsSet);Assert(slowForm.TryAcquireGpu(),"Background profile read blocks GPU operation");Assert(!slowForm.TryAcquireGpu(),"Concurrent GPU operation allowed");slowForm.ReleaseGpu();}
+                                finally {finish.Set();slowHost.BeforeActivePlan=null;}
+                                await refresh;
+                            }
+                            slowForm.Close();
+                        }
+                        Console.WriteLine("PASS UI: background profile reading does not block GPU, real GPU exclusion remains");
                     } catch(Exception ex) { Console.Error.WriteLine(ex); result=1; }
                     form.Close();
                 };

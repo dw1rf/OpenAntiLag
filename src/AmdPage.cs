@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -10,9 +10,9 @@ namespace OpenAntiLag {
         readonly CheckBox anti=new CheckBox {Text="Обычный Radeon Anti-Lag (без Anti-Lag 2 в игре)",AutoSize=true,Checked=true};
         readonly TextBox body=new TextBox {Name="gpuGuide",Multiline=true,ReadOnly=true,Dock=DockStyle.Fill,ScrollBars=ScrollBars.Vertical,BorderStyle=BorderStyle.None};
         readonly TextBox status=new TextBox {Name="amdStatus",Multiline=true,ReadOnly=true,Dock=DockStyle.Fill,ScrollBars=ScrollBars.Vertical,Height=70,BorderStyle=BorderStyle.None};
-        readonly ProfileButton apply=new ProfileButton {Name="applyAmd",Text="Применить AMD",Primary=true},restore=new ProfileButton {Name="restoreAmd",Text="Восстановить AMD"},read=new ProfileButton {Text="Прочитать AMD"};
+        readonly ProfileButton apply=new ProfileButton {Name="applyAmd",Text="Применить AMD",Primary=true},restore=new ProfileButton {Name="restoreAmd",Text="Восстановить AMD"},read=new ProfileButton {Name="readAmd",Text="Прочитать AMD"};
         readonly AmdProfiles controller;readonly Func<bool> acquire;readonly Action release;readonly bool preview,logging;
-        bool running,loaded,ready;
+        bool running,ready;
         public AmdPage(bool preview,Func<bool> acquire,Action release,AmdProfiles controller=null):base("AMD · Глобальные") {
             this.preview=preview;this.acquire=acquire;this.release=release;logging=controller==null&&!preview;
             this.controller=controller??new AmdProfiles(()=>new AmdDriver(),new AmdStore(Path.Combine(Program.DataDirectory,"amd-backup.xml")));
@@ -21,13 +21,13 @@ namespace OpenAntiLag {
             for(int i=0;i<7;i++)root.RowStyles.Add(new RowStyle(i==3?SizeType.Percent:SizeType.AutoSize,i==3?100:0));
             mode.Items.AddRange(new object[]{"Минимальная задержка · разрывы допустимы","Без разрывов · FreeSync настраивается отдельно"});mode.SelectedIndex=0;
             if(preview){devices.Items.Add(new AmdGpu {Id="preview",Name="AMD Radeon — предпросмотр"});devices.SelectedIndex=0;}
+            body.HandleCreated+=delegate{WindowTheme.Scrollbar(body.Handle);};status.HandleCreated+=delegate{WindowTheme.Scrollbar(status.Handle);};
             body.BackColor=status.BackColor=Theme.Background;body.ForeColor=status.ForeColor=Theme.Text;body.Margin=new Padding(0,10,0,10);status.Text=preview?"Предпросмотр. Драйвер не изменяется.":"Экспериментальная поддержка ADLX. Сначала прочитайте доступные GPU и параметры.";
             var buttons=new TableLayoutPanel {Dock=DockStyle.Fill,AutoSize=true,ColumnCount=2};buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,50));buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,50));
             foreach(var b in new[]{apply,restore,read}){b.Dock=DockStyle.Fill;b.Height=44;}buttons.Controls.Add(apply,0,0);buttons.Controls.Add(restore,1,0);
             root.Controls.Add(devices,0,0);root.Controls.Add(mode,0,1);root.Controls.Add(anti,0,2);root.Controls.Add(body,0,3);root.Controls.Add(read,0,4);root.Controls.Add(buttons,0,5);root.Controls.Add(status,0,6);Controls.Add(root);
             mode.SelectedIndexChanged+=delegate{Plan();};anti.CheckedChanged+=delegate{Plan();};devices.SelectedIndexChanged+=delegate{Plan();};
             apply.Click+=async delegate{await Run(1);};restore.Click+=async delegate{await Run(2);};read.Click+=async delegate{await Run(0);};
-            VisibleChanged+=async delegate{if(Visible&&!loaded&&!preview){loaded=true;await Run(0);}};
             apply.Enabled=restore.Enabled=false;read.Enabled=!preview;Plan();
         }
         void Plan(){body.Text=AmdProfiles.Guide(mode.SelectedIndex==1,anti.Checked);}

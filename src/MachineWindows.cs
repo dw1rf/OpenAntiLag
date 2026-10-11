@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -112,7 +112,9 @@ namespace OpenAntiLag {
             try {
                 if(!IsAdmin || expectedSid!=Sid)throw new UnauthorizedAccessException("Подтвердите UAC для той же учётной записи Windows.");
                 if(action=="check")return 0; // Read-only UAC probe, no system engine or settings accessed.
-                if(action!="disable")throw new NotSupportedException("Системные изменения доступны только для восстановления старого профиля.");
+                var selected=action.StartsWith("selected:",StringComparison.Ordinal)?MachineSettings.Selection(action.Substring(9).Split(',')):null;
+                if(action!="disable"&&selected==null)throw new NotSupportedException("Нужен явный выбор системных настроек.");
+                if(selected!=null&&selected.Contains("hags")&&Environment.OSVersion.Version.Build<19041)throw new NotSupportedException("HAGS требует Windows 10 2004 или новее.");
                 bool created;
                 using(var mutex=new Mutex(true,@"Global\OpenAntiLag-SystemProfile",out created)) {
                     bool owned=created;
@@ -120,14 +122,17 @@ namespace OpenAntiLag {
                         if(!owned) {try {owned=mutex.WaitOne(0);}catch(AbandonedMutexException){owned=true;}}
                         if(!owned)throw new IOException("Уже выполняется другая системная операция.");
                         var engine=new MachineEngine(new MachineHost(),new MachineStore(),Sid);
-                        engine.Disable();
+                        if(selected==null)engine.Disable();else engine.EnableSelected(selected);
                     } finally {if(owned)mutex.ReleaseMutex();}
                 }
                 return 0;
             } catch(Exception error) {System.Windows.Forms.MessageBox.Show(error.Message,"Open AntiLag — системный профиль",System.Windows.Forms.MessageBoxButtons.OK,System.Windows.Forms.MessageBoxIcon.Error);return 1;}
         }
         public static void Elevate(bool enable) {
-            string action=enable?"enable":"disable";
+            ElevateAction(enable?"enable":"disable");
+        }
+        public static void ElevateSelected(string[] ids) {MachineSettings.Selection(ids);if(ids.Length>0)ElevateAction("selected:"+String.Join(",",ids));}
+        static void ElevateAction(string action) {
             if(IsAdmin) {
                 if(Run(action,Sid)!=0)throw new IOException("Системная операция не завершена. Подробности показаны в окне администратора.");
                 return;
