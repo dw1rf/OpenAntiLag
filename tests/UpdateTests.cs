@@ -16,6 +16,9 @@ namespace OpenAntiLag {
             finally {Directory.Delete(dir,true);}
         }
         public static int Run() {
+            Test("Updater current version matches the actual application assembly",delegate {var app=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"OpenAntiLag.exe");Assert(Updates.Current==System.Reflection.AssemblyName.GetAssemblyName(app).Version);});
+            Test("Current release is not offered again after restart",delegate {var r=Release();r.tag_name="v"+Updates.Current.ToString(3);r.assets[0].browser_download_url=Updates.Repository+"/releases/download/"+r.tag_name+"/OpenAntiLag.exe";Assert(Select(r)==null);});
+            Test("Installer rejects identical assembly and mismatched advertised version",delegate {var app=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"OpenAntiLag.exe");Reject(()=>Updates.ValidateUpgrade(app,app,Updates.Current));Reject(()=>Updates.ValidateUpgrade(app,app,new Version(9,0,0,0)));});
             Test("Update accepts complete newer stable release",delegate{Assert(Select(Release())!=null);});
             Test("Update skips current and older versions",delegate {var r=Release();r.tag_name="v0.5.0";Assert(Select(r)==null);r.tag_name="v0.3.0";Assert(Select(r)==null);});
             Test("Update skips beta and drafts",delegate {var r=Release();r.prerelease=true;Assert(Select(r)==null);r.prerelease=false;r.draft=true;Assert(Select(r)==null);r.draft=false;r.tag_name="v0.7.0-beta.1";Assert(Select(r)==null);});

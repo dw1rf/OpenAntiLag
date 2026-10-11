@@ -20,7 +20,7 @@ namespace OpenAntiLag {
     public static class Updates {
         public const string Repository="https://github.com/dw1rf/OpenAntiLag";
         public const string Endpoint="https://api.github.com/repos/dw1rf/OpenAntiLag/releases/latest";
-        public static readonly Version Current=new Version(0,6,0,0);
+        public static readonly Version Current=typeof(Updates).Assembly.GetName().Version;
         const long MaxAsset=32*1024*1024;
         static string Preference {get{return Path.Combine(Program.DataDirectory,"updates.disabled");}}
         public static bool Enabled {get{return !File.Exists(Preference);} set {Directory.CreateDirectory(Program.DataDirectory);if(value) {if(File.Exists(Preference))File.Delete(Preference);}else File.WriteAllText(Preference,"disabled");}}
@@ -45,7 +45,7 @@ namespace OpenAntiLag {
         static async Task<byte[]> Get(string address,long limit) {
             ServicePointManager.SecurityProtocol|=SecurityProtocolType.Tls12;
             using(var handler=new HttpClientHandler {AllowAutoRedirect=false})using(var client=new HttpClient(handler) {Timeout=TimeSpan.FromSeconds(45),MaxResponseContentBufferSize=limit}) {
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("OpenAntiLag/0.6.1");
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("OpenAntiLag/0.6.2");
                 Uri url=new Uri(address);
                 for(int n=0;n<6;n++) {
                     if(!Trusted(url))throw new InvalidDataException("Недопустимый адрес обновления.");
@@ -75,9 +75,15 @@ namespace OpenAntiLag {
                 return new UpdatePackage {Version=version,Directory=dir,Hash=hash};
             } catch {File.Delete(payload);throw;}
         }
+        public static void ValidateUpgrade(string payload,string destination,Version advertised) {
+            var next=AssemblyName.GetAssemblyName(payload);var installed=AssemblyName.GetAssemblyName(destination);
+            if(next.Name!="OpenAntiLag"||installed.Name!="OpenAntiLag"||next.Version!=advertised||next.Version<=installed.Version||next.Version<=Current)
+                throw new InvalidDataException("Обновление должно быть новее установленной версии. Повторная установка заблокирована.");
+        }
         public static void StartInstall(UpdatePackage package,bool hidden) {
             if(MachineWorker.IsAdmin)throw new IOException("Автообновление доступно при обычном запуске без прав администратора.");
             string target=Application.ExecutablePath;
+            ValidateUpgrade(Path.Combine(package.Directory,"payload.exe"),target,package.Version);
             string probe=Path.Combine(Path.GetDirectoryName(target),".openantilag-"+Guid.NewGuid().ToString("N"));
             using(File.Create(probe)){} File.Delete(probe);
             Verify(Path.Combine(package.Directory,"payload.exe"),package.Hash);
@@ -111,6 +117,7 @@ namespace OpenAntiLag {
                 Verify(payload,ticket.Hash);
                 var assembly=AssemblyName.GetAssemblyName(payload);
                 if(assembly.Name!="OpenAntiLag"||assembly.Version!=new Version(ticket.Version)||assembly.Version<=Current)throw new InvalidDataException("Недопустимая версия обновления.");
+                ValidateUpgrade(payload,target,new Version(ticket.Version));
                 Replace(payload,target,ticket.OriginalHash,ticket.Hash,delegate(string path) {Process.Start(new ProcessStartInfo(path,ticket.Hidden?"--tray":"") {UseShellExecute=false,WorkingDirectory=Path.GetDirectoryName(path)});});
                 File.Delete(ticketFile);return 0;
             }catch(Exception error) {Program.Log("Update failed: "+error);MessageBox.Show("Обновление не установлено. Предыдущая версия сохранена.\n"+error.Message,"Open AntiLag",MessageBoxButtons.OK,MessageBoxIcon.Warning);return 1;}
