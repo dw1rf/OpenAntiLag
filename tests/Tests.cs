@@ -43,6 +43,9 @@ namespace OpenAntiLag {
         static void Throws(Action action) { bool threw = false; try { action(); } catch { threw = true; } Assert(threw, "Expected failure"); }
         static void Test(string name, Action action) { action(); Console.WriteLine("PASS " + name); count++; }
         [STAThread] public static int Main(string[] args) {
+            if(args.Length==2&&args[0]=="--shader-fixture")return ShaderTests.Fixture(args[1]);
+            if(args.Length==3&&args[0]=="--shader-module-check")return ShaderTests.ModuleCheck(args[1],args[2]);
+            if(args.Length==2&&args[0]=="--shader-scan") {try {var module=new ShaderEngine(args[1]);var result=module.Run("scan",null,Console.WriteLine,System.Threading.CancellationToken.None).GetAwaiter().GetResult();Console.WriteLine("Parsed games: "+ShaderProtocol.Games(result).Count);return 0;}catch(Exception ex){Console.Error.WriteLine(ex);return 1;}}
             if(args.Length==1&&args[0]=="--amd-read") {try {using(var d=new AmdDriver()){foreach(var gpu in d.Devices){Console.WriteLine(gpu.Name);d.Select(gpu.Id);foreach(var k in AmdProfiles.Keys)Console.WriteLine(k+": "+d.Read(k));}}return 0;}catch(NotSupportedException ex){Console.WriteLine(ex.Message);return 0;}catch(Exception ex){Console.Error.WriteLine(ex);return 1;}}
             if(args.Length==1&&args[0]=="--check-elevation") {try {ElevatedProcess.Run(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"OpenAntiLag.exe"),"--machine check "+MachineWorker.Sid);Console.WriteLine("PASS actual UAC launch; no system settings changed.");return 0;}catch(Exception ex){Console.Error.WriteLine(ex);return 1;}}
             if(args.Length==1&&args[0]=="--nvidia-stage-check") {
@@ -73,7 +76,7 @@ namespace OpenAntiLag {
                 using (var e = new Engine(new FakeHost(), new MemoryStore())) {
                 if(args.Length > 2 && args[2] == "active") e.Enable(new ProfileOptions { GameMode=true, DisableCapture=true, DisableMouseAcceleration=true, CpuReady=true, PcieReady=true, Timer=true });
                 using (var f = new MainForm(e, false, true)) {
-                    if(args.Length > 2 && args[2] == "small") f.ClientSize = new Size(630,560);
+                    if(args.Length > 2 && (args[2] == "small"||args[2]=="shaders-small")) f.ClientSize = new Size(630,560);
                     if(args.Length > 3) {
                         float scale=float.Parse(args[3],System.Globalization.CultureInfo.InvariantCulture);
                         var fonts=new Dictionary<Control,Font>(); CaptureFonts(f,fonts);
@@ -82,6 +85,7 @@ namespace OpenAntiLag {
                         f.ResumeLayout(true);
                     }
                     if(args.Length>2 && (args[2]=="nvidia" || args[2]=="amd")) ((TabControl)f.Controls.Find("mainTabs",true)[0]).SelectedIndex=args[2]=="amd"?2:1;
+                    if(args.Length>2 && args[2].StartsWith("shaders")) ((TabControl)f.Controls.Find("mainTabs",true)[0]).SelectedIndex=3;
                     var tick = new System.Windows.Forms.Timer { Interval = 600 };
                     tick.Tick += delegate {
                         tick.Stop();
@@ -115,7 +119,7 @@ namespace OpenAntiLag {
                     try { var store = new XmlStateStore(Path.Combine(dir,"state.xml")); store.Save(new ProfileState()); store.Save(new ProfileState { Phase = "Enabled", OriginalPlan = FakeHost.Original, OwnedPlan = Guid.NewGuid().ToString() }); Assert(store.Load().Phase == "Enabled", "Save failed"); File.WriteAllText(Path.Combine(dir,"state.xml"), "broken XML"); Throws(delegate { store.Load(); }); }
                     finally { if (Directory.Exists(dir)) Directory.Delete(dir,true); }
                 });
-                ProfileTests(); count += MachineTests.Run(); count += UpdateTests.Run(); count += NvidiaTests.Run();count += AmdTests.Run();                Test("UAC launches on STA with exact path and working directory",delegate {ElevatedProcess.Run(System.Windows.Forms.Application.ExecutablePath,"--machine check test",delegate(System.Diagnostics.ProcessStartInfo info){Assert(System.Threading.Thread.CurrentThread.GetApartmentState()==System.Threading.ApartmentState.STA,"Not STA");Assert(info.Verb=="runas"&&info.UseShellExecute&&info.WorkingDirectory==Path.GetDirectoryName(info.FileName)&&info.Arguments=="--machine check test","Wrong UAC request");return 0;});});
+                ProfileTests(); count += MachineTests.Run(); count += UpdateTests.Run(); count += NvidiaTests.Run();count += AmdTests.Run();count += ShaderTests.Run();                Test("UAC launches on STA with exact path and working directory",delegate {ElevatedProcess.Run(System.Windows.Forms.Application.ExecutablePath,"--machine check test",delegate(System.Diagnostics.ProcessStartInfo info){Assert(System.Threading.Thread.CurrentThread.GetApartmentState()==System.Threading.ApartmentState.STA,"Not STA");Assert(info.Verb=="runas"&&info.UseShellExecute&&info.WorkingDirectory==Path.GetDirectoryName(info.FileName)&&info.Arguments=="--machine check test","Wrong UAC request");return 0;});});
                 Test("UAC cancellation remains cancellation",delegate {try {ElevatedProcess.Run(System.Windows.Forms.Application.ExecutablePath,"test",delegate {throw new System.ComponentModel.Win32Exception(1223);});throw new Exception("Expected cancellation");}catch(OperationCanceledException){}});
                 Test("UAC unknown native error is actionable",delegate {try {ElevatedProcess.Run(System.Windows.Forms.Application.ExecutablePath,"test",delegate {throw new System.ComponentModel.Win32Exception(-2);});throw new Exception("Expected launch failure");}catch(IOException ex){Assert(ex.Message.Contains("0xFFFFFFFE")&&ex.InnerException is System.ComponentModel.Win32Exception,"Lost diagnostic");}});
                 Console.WriteLine(count + " tests passed. No real system settings changed."); return 0;
@@ -173,6 +177,24 @@ namespace OpenAntiLag {
                         }
                         Console.WriteLine("PASS UI: system actions, GPU tabs, NVIDIA apply/restore buttons on simulated driver, narrow layout");
                         Console.WriteLine("PASS UI: legacy recovery, reboot gate and reset of aggressive options");
+                        bool shaderLocked=false,waitForStop=false;int compileCalls=0;
+                        Func<string,string,Action<string>,System.Threading.CancellationToken,Task<string>> shaderRun=async (command,id,log,ct)=>{
+                            if(command=="scan")return ShaderTests.Listing;
+                            if(command=="queue"){compileCalls++;if(waitForStop)await Task.Delay(System.Threading.Timeout.Infinite,ct);}
+                            return "done";
+                        };
+                        using(var shaderPage=new ShaderPage(false,()=>{if(shaderLocked)return false;shaderLocked=true;return true;},()=>{shaderLocked=false;},null,shaderRun)) {
+                            tabs.TabPages.Add(shaderPage);tabs.SelectedTab=shaderPage;
+                            var shaderScan=(Button)shaderPage.Controls.Find("scanShaders",true)[0];var shaderCompile=(Button)shaderPage.Controls.Find("compileShaders",true)[0];var shaderStop=(Button)shaderPage.Controls.Find("stopShaders",true)[0];var shaderGames=(ListView)shaderPage.Controls.Find("shaderGames",true)[0];
+                            shaderScan.PerformClick();await WaitUntil(()=>shaderGames.Items.Count==4&&!shaderLocked);
+                            shaderGames.Items[1].Selected=true;Assert(!shaderCompile.Enabled,"Recording-only game can compile");shaderGames.Items[1].Selected=false;shaderGames.Items[0].Selected=true;
+                            Assert(shaderCompile.Enabled,"Ready game cannot compile");shaderCompile.PerformClick();await WaitUntil(()=>compileCalls==1&&!shaderLocked);
+                            shaderGames.Items[0].Selected=true;waitForStop=true;shaderCompile.PerformClick();await WaitUntil(()=>shaderStop.Enabled&&shaderLocked);
+                            Assert(!shaderScan.Enabled,"Scan enabled during compile");shaderStop.PerformClick();await WaitUntil(()=>!shaderLocked&&shaderCompile.Enabled);
+                            Assert(((Label)shaderPage.Controls.Find("shaderStatus",true)[0]).Text.StartsWith("Остановлено"),"Cancellation not shown");
+                            CheckLayout(shaderPage);tabs.TabPages.Remove(shaderPage);
+                        }
+                        Console.WriteLine("PASS UI: shader scan, unsupported game guard, compile, shared operation lock and cancellation");
                     } catch(Exception ex) { Console.Error.WriteLine(ex); result=1; }
                     form.Close();
                 };

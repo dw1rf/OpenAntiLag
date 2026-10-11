@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Web.Script.Serialization;
 
@@ -8,7 +8,7 @@ namespace OpenAntiLag {
         static void Assert(bool ok) {if(!ok)throw new Exception("Update assertion failed");}
         static void Test(string name,Action action){action();count++;Console.WriteLine("PASS "+name);}
         static void Reject(Action action){bool rejected=false;try{action();}catch{rejected=true;}Assert(rejected);}
-        static ReleaseInfo Release() {return new ReleaseInfo {tag_name="v0.6.0",assets=new[]{new ReleaseAsset {name="OpenAntiLag.exe",size=100,digest="sha256:"+new string('a',64),browser_download_url=Updates.Repository+"/releases/download/v0.6.0/OpenAntiLag.exe"}}};}
+        static ReleaseInfo Release() {return new ReleaseInfo {tag_name="v0.7.0",assets=new[]{new ReleaseAsset {name="OpenAntiLag.exe",size=100,digest="sha256:"+new string('a',64),browser_download_url=Updates.Repository+"/releases/download/v0.7.0/OpenAntiLag.exe"}}};}
         static ReleaseAsset Select(ReleaseInfo release){Version version;return Updates.Select(new JavaScriptSerializer().Serialize(release),Updates.Current,out version);}
         static void Files(Action<string,string> action) {
             string dir=Path.Combine(Path.GetTempPath(),"OpenAntiLag-update-test-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(dir);
@@ -18,7 +18,7 @@ namespace OpenAntiLag {
         public static int Run() {
             Test("Update accepts complete newer stable release",delegate{Assert(Select(Release())!=null);});
             Test("Update skips current and older versions",delegate {var r=Release();r.tag_name="v0.5.0";Assert(Select(r)==null);r.tag_name="v0.3.0";Assert(Select(r)==null);});
-            Test("Update skips beta and drafts",delegate {var r=Release();r.prerelease=true;Assert(Select(r)==null);r.prerelease=false;r.draft=true;Assert(Select(r)==null);r.draft=false;r.tag_name="v0.6.0-beta.1";Assert(Select(r)==null);});
+            Test("Update skips beta and drafts",delegate {var r=Release();r.prerelease=true;Assert(Select(r)==null);r.prerelease=false;r.draft=true;Assert(Select(r)==null);r.draft=false;r.tag_name="v0.7.0-beta.1";Assert(Select(r)==null);});
             Test("Update rejects foreign URL",delegate {var r=Release();r.assets[0].browser_download_url="https://example.org/OpenAntiLag.exe";Reject(delegate{Select(r);});});
             Test("Update rejects missing checksum",delegate {var r=Release();r.assets[0].digest=null;Reject(delegate{Select(r);});});
             Test("Update rejects missing executable",delegate {var r=Release();r.assets=new ReleaseAsset[0];Reject(delegate{Select(r);});});
