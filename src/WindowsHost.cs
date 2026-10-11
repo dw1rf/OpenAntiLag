@@ -9,7 +9,6 @@ using System.ComponentModel;
 namespace OpenAntiLag {
     public sealed class WindowsHost : IHost {
         bool timer;
-        const string HighPerformance = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c";
         [DllImport("winmm.dll")] static extern uint timeBeginPeriod(uint period);
         [DllImport("winmm.dll")] static extern uint timeEndPeriod(uint period);
         [DllImport("user32.dll", EntryPoint = "SystemParametersInfoW", SetLastError = true)]
@@ -34,9 +33,12 @@ namespace OpenAntiLag {
             return Id(match.Value);
         }
         public bool HasPlan(string id) { return Power("/list").IndexOf(Id(id), StringComparison.OrdinalIgnoreCase) >= 0; }
-        public void CreatePlan(string id) {
-            Power("/duplicatescheme " + HighPerformance + " " + Id(id));
-            Power("/changename " + Id(id) + " \"Open AntiLag Performance\"");
+        public void CreatePlan(string id, string source) {
+            if(Environment.OSVersion.Platform!=PlatformID.Win32NT || Environment.OSVersion.Version.Major<10 || !Environment.Is64BitProcess)
+                throw new NotSupportedException("Профиль поддерживает Windows 10/11 x64.");
+            // Preserve the user's existing AC/DC policies instead of forcing High Performance.
+            Power("/duplicatescheme " + Id(source) + " " + Id(id));
+            Power("/changename " + Id(id) + " \"Open AntiLag Profile\"");
         }
         public void Activate(string id) { Power("/setactive " + Id(id)); }
         public void ConfigurePlan(string id, ProfileOptions options) {

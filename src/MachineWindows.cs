@@ -112,6 +112,7 @@ namespace OpenAntiLag {
             try {
                 if(!IsAdmin || expectedSid!=Sid)throw new UnauthorizedAccessException("Подтвердите UAC для той же учётной записи Windows.");
                 if(action=="check")return 0; // Read-only UAC probe, no system engine or settings accessed.
+                if(action!="disable")throw new NotSupportedException("Системные изменения доступны только для восстановления старого профиля.");
                 bool created;
                 using(var mutex=new Mutex(true,@"Global\OpenAntiLag-SystemProfile",out created)) {
                     bool owned=created;
@@ -119,7 +120,7 @@ namespace OpenAntiLag {
                         if(!owned) {try {owned=mutex.WaitOne(0);}catch(AbandonedMutexException){owned=true;}}
                         if(!owned)throw new IOException("Уже выполняется другая системная операция.");
                         var engine=new MachineEngine(new MachineHost(),new MachineStore(),Sid);
-                        if(action=="enable")engine.Enable();else if(action=="disable")engine.Disable();else throw new InvalidOperationException("Неизвестная операция.");
+                        engine.Disable();
                     } finally {if(owned)mutex.ReleaseMutex();}
                 }
                 return 0;

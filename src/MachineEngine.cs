@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -54,24 +54,8 @@ namespace OpenAntiLag {
         public MachineEngine(IMachineHost host,IMachineStore store,string sid) {this.host=host;this.store=store;this.sid=sid;State=store.Load();MachineSettings.Validate(State);}
         void CheckOwner() { if(State.OwnerSid!=sid)throw new InvalidOperationException("Системный профиль принадлежит другому пользователю. Отключите его из той учётной записи."); if(host.BootEntry()!=State.BootEntry)throw new InvalidOperationException("Вы загружены из другой записи Windows. Автоматический откат заблокирован."); }
         public void Enable() {
-            if(State.Phase!="Disabled")throw new InvalidOperationException("Сначала отключите или восстановите существующий системный профиль.");
-            var pending=new MachineState {Phase="Applying",OwnerSid=sid,BootEntry=host.BootEntry()};
-            foreach(string id in MachineSettings.Ids) pending.Entries.Add(new MachineEntry {Id=id,Original=host.Read(id,pending.BootEntry)});
-            MachineSettings.Validate(pending);
-            host.Preflight(pending.Entries.Any(x=>x.Id!="hags"&&x.Id!="priority"&&x.Original!=MachineSettings.Target(x.Id)));
-            store.Save(pending); State=pending;
-            try {
-                foreach(var entry in State.Entries) {
-                    if(entry.Original==MachineSettings.Target(entry.Id))continue;
-                    entry.Attempted=true; State.ChangeBoot=host.BootSession(); store.Save(State);
-                    host.Write(entry.Id,State.BootEntry,MachineSettings.Target(entry.Id));
-                    if(host.Read(entry.Id,State.BootEntry)!=MachineSettings.Target(entry.Id))throw new IOException("Windows не сохранила "+entry.Id);
-                }
-                State.Phase="Enabled"; State.Error=null; store.Save(State);
-            } catch(Exception error) {
-                try { Disable(); } catch(Exception rollback) { throw new IOException("Системное применение прервано; нужен повторный откат.\n"+error.Message+"\n"+rollback.Message,error); }
-                throw new IOException("Системный профиль не применён. Изменения восстановлены.\n"+error.Message,error);
-            }
+            // Retained only to reject old callers; system settings are restore-only since 0.5.7.
+            throw new NotSupportedException("Новые изменения BCD, HAGS и системных приоритетов отключены. Доступно только восстановление старого профиля.");
         }
         public void Disable() {
             if(State.Phase=="Disabled")return; CheckOwner(); State.Phase="Restoring";store.Save(State);

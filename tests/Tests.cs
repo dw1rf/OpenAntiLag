@@ -15,12 +15,13 @@ namespace OpenAntiLag {
         public string Fail;
         public bool Timer;
         public int Writes;
+        public string CopiedFrom;
         public readonly Dictionary<string, int[]> Values = new Dictionary<string, int[]> { { "game-mode", new [] { 0 } }, { "capture-app", new [] { 1 } }, { "mouse-acceleration", new [] { 6, 10, 1 } } };
         public bool IgnoreWrite;
         public string ActivePlan() { return Current; }
         public bool HasPlan(string id) { return Plans.Contains(id); }
         void Check(string action) { if (Fail == action) { Fail = null; throw new IOException("Injected failure: " + action); } }
-        public void CreatePlan(string id) { Writes++; Plans.Add(id); Check("create"); }
+        public void CreatePlan(string id, string source) { if(!Plans.Contains(source))throw new IOException("Missing source plan");CopiedFrom=source;Writes++; Plans.Add(id); Check("create"); }
         public void Activate(string id) { Check("activate"); if (!Plans.Contains(id)) throw new IOException("Missing plan"); Writes++; Current = id; }
         public void DeletePlan(string id) { Check("delete"); if (Current == id) throw new IOException("Active plan"); Writes++; Plans.Remove(id); }
         public void StartTimer() { Check("timer"); Timer = true; }
@@ -103,7 +104,7 @@ namespace OpenAntiLag {
                     Test("Rollback after " + point + " failure", delegate { var h = new FakeHost { Fail = point }; var s = new MemoryStore(); using(var e = new Engine(h,s)) { Throws(delegate { e.Enable(true); }); Assert(h.Current == FakeHost.Original && h.Plans.Count == 1 && s.Load().Phase == "Disabled", "Incomplete rollback"); } });
                 }
                 Test("Disk failure before apply has zero system writes", delegate { var h = new FakeHost(); var s = new MemoryStore { FailSave = true }; using(var e = new Engine(h,s)) { Throws(delegate { e.Enable(false); }); Assert(h.Writes == 0, "Changed system without recovery record"); } });
-                Test("Recover after process interruption", delegate { var h = new FakeHost(); var s = new MemoryStore(); string owned = Guid.NewGuid().ToString(); s.Save(new ProfileState { Phase = "Applying", OriginalPlan = FakeHost.Original, OwnedPlan = owned }); h.CreatePlan(owned); h.Activate(owned); using(var e = new Engine(h,s)) { e.Disable(); Assert(h.Current == FakeHost.Original && h.Plans.Count == 1, "Recovery failed"); } });
+                Test("Recover after process interruption", delegate { var h = new FakeHost(); var s = new MemoryStore(); string owned = Guid.NewGuid().ToString(); s.Save(new ProfileState { Phase = "Applying", OriginalPlan = FakeHost.Original, OwnedPlan = owned }); h.CreatePlan(owned,FakeHost.Original); h.Activate(owned); using(var e = new Engine(h,s)) { e.Disable(); Assert(h.Current == FakeHost.Original && h.Plans.Count == 1, "Recovery failed"); } });
                 Test("External plan selection preserved", delegate { var h = new FakeHost(); var s = new MemoryStore(); using(var e = new Engine(h,s)) { e.Enable(false); string other = Guid.NewGuid().ToString(); h.Plans.Add(other); h.Activate(other); Assert(!e.IsActive, "Wrong status"); e.Disable(); Assert(h.Current == other && h.Plans.Count == 2, "External plan changed"); } });
                 Test("Retry failed restoration", delegate { var h = new FakeHost(); var s = new MemoryStore(); using(var e = new Engine(h,s)) { e.Enable(false); h.Fail = "delete"; Throws(delegate { e.Disable(); }); Assert(s.Load().Phase == "Restoring", "Journal lost"); } using(var e = new Engine(h,s)) { e.Disable(); Assert(h.Plans.Count == 1 && s.Load().Phase == "Disabled", "Retry failed"); } });
                 Test("Missing original plan retains recovery state", delegate { var h = new FakeHost(); var s = new MemoryStore(); using(var e = new Engine(h,s)) { e.Enable(false); h.Plans.Remove(FakeHost.Original); Throws(delegate { e.Disable(); }); Assert(s.Load().Phase == "Restoring" && h.Plans.Contains(e.State.OwnedPlan), "Recovery data destroyed"); } });
@@ -134,6 +135,7 @@ namespace OpenAntiLag {
                         await WaitUntil(delegate { return on.Enabled; });
                         CheckLayout(form); on.PerformClick();
                         await WaitUntil(delegate { return engine.State.Phase=="Enabled" && off.Enabled; });
+                        Assert(!FindLabels(form).Any(x=>x.Text=="Нужно восстановление"||x.Text=="Нужна перезагрузка ПК"),"Safe profile incorrectly needs system recovery");
                         Assert(!on.Enabled,"Enable should be disabled when active"); CheckLayout(form); off.PerformClick();
                         await WaitUntil(delegate { return engine.State.Phase=="Disabled" && on.Enabled; });
                         form.ClientSize=new Size(630,560); form.PerformLayout(); CheckLayout(form);
@@ -152,7 +154,25 @@ namespace OpenAntiLag {
                         var amdApply=(Button)amdPage.Controls.Find("applyAmd",true)[0];var amdRestore=(Button)amdPage.Controls.Find("restoreAmd",true)[0];
                         await WaitUntil(()=>amdApply.Enabled);amdApply.PerformClick();await WaitUntil(()=>amdApply.Enabled);Assert(amdStore.Load()!=null&&amdStore.Load().Phase=="Applied","AMD UI apply failed");
                         amdRestore.PerformClick();await WaitUntil(()=>amdRestore.Enabled);Assert(amdStore.Load()==null&&amdDriver.Values["chill"]==1,"AMD UI restore failed");tabs.TabPages.Remove(amdPage);amdPage.Dispose();
+                        using(var legacyEngine=new Engine(new FakeHost(),new MemoryStore())) {
+                            legacyEngine.Enable(new ProfileOptions {CpuReady=true,PcieReady=true,Timer=true});
+                            legacyEngine.State.SchemaVersion=2;
+                            var legacySystem=new TestSystemClient {Pending=true};legacySystem.Value.Phase="Enabled";
+                            using(var legacyForm=new MainForm(legacyEngine,false,true,legacySystem)) {
+                                legacyForm.Show();
+                                var legacyOn=(Button)legacyForm.Controls.Find("enable",true)[0];var legacyOff=(Button)legacyForm.Controls.Find("disable",true)[0];
+                                await WaitUntil(()=>legacyOff.Enabled);
+                                Assert(!legacyOn.Enabled&&legacyOff.Text=="Восстановить"&&FindLabels(legacyForm).Any(x=>x.Text=="Восстановите старый профиль"),"Migration prompt missing");
+                                legacyOff.PerformClick();await WaitUntil(()=>legacyEngine.State.Phase=="Disabled"&&!legacyOff.Enabled);
+                                Assert(!legacyOn.Enabled&&legacySystem.DisableCalls==1,"Missing reboot gate");
+                                legacySystem.Pending=false;await legacyForm.RefreshState();
+                                Assert(legacyOn.Enabled,"Cannot enable after restart");legacyOn.PerformClick();await WaitUntil(()=>legacyEngine.State.Phase=="Enabled"&&legacyOff.Enabled);
+                                Assert(!legacyEngine.State.Options.CpuReady&&!legacyEngine.State.Options.PcieReady&&!legacyEngine.State.TimerRequested,"Legacy aggressive options carried into safe profile");
+                                legacyForm.Close();
+                            }
+                        }
                         Console.WriteLine("PASS UI: system actions, GPU tabs, NVIDIA apply/restore buttons on simulated driver, narrow layout");
+                        Console.WriteLine("PASS UI: legacy recovery, reboot gate and reset of aggressive options");
                     } catch(Exception ex) { Console.Error.WriteLine(ex); result=1; }
                     form.Close();
                 };
@@ -171,6 +191,9 @@ namespace OpenAntiLag {
                 }
                 CheckLayout(c);
             }
+        }
+        static IEnumerable<Label> FindLabels(Control root) {
+            foreach(Control child in root.Controls) {var label=child as Label;if(label!=null)yield return label;foreach(var nested in FindLabels(child))yield return nested;}
         }
         static void ProfileTests() {
             Test("Gaming profile applies and restores all values including absence", delegate {

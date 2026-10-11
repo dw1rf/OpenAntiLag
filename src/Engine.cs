@@ -21,7 +21,7 @@ namespace OpenAntiLag {
     public interface IHost {
         string ActivePlan();
         bool HasPlan(string id);
-        void CreatePlan(string id);
+        void CreatePlan(string id, string source);
         void Activate(string id);
         void DeletePlan(string id);
         void StartTimer();
@@ -37,7 +37,7 @@ namespace OpenAntiLag {
             if (!File.Exists(path)) return new ProfileState();
             using (var stream = File.OpenRead(path)) {
                 var state = (ProfileState)new XmlSerializer(typeof(ProfileState)).Deserialize(stream);
-                if (state.SchemaVersion < 1 || state.SchemaVersion > 2) throw new InvalidDataException("Неподдерживаемая версия состояния.");
+                if (state.SchemaVersion < 1 || state.SchemaVersion > 3) throw new InvalidDataException("Неподдерживаемая версия состояния.");
                 if (state.Options == null || state.SettingsBackup == null) throw new InvalidDataException("Повреждено состояние профиля.");
                 foreach (var entry in state.SettingsBackup) Settings.Validate(entry);
                 if (state.SettingsBackup.Select(x => x.Id).Distinct().Count() != state.SettingsBackup.Count) throw new InvalidDataException("Дублирующиеся настройки в журнале.");
@@ -73,13 +73,13 @@ namespace OpenAntiLag {
         public void Enable(bool timer) { Enable(new ProfileOptions { Timer = timer }); }
         public void Enable(ProfileOptions options) {
             if (State.Phase != "Disabled") throw new InvalidOperationException("Сначала восстановите предыдущий профиль.");
-            var pending = new ProfileState { Phase = "Applying", SchemaVersion = 2, OriginalPlan = host.ActivePlan(), OwnedPlan = Guid.NewGuid().ToString(), TimerRequested = options.Timer, Options = options };
+            var pending = new ProfileState { Phase = "Applying", SchemaVersion = 3, OriginalPlan = host.ActivePlan(), OwnedPlan = Guid.NewGuid().ToString(), TimerRequested = options.Timer, Options = options };
             foreach (string id in Settings.Selected(options)) pending.SettingsBackup.Add(new SettingBackup { Id = id, Original = host.ReadSetting(id) });
             // Persist the recovery record BEFORE the first system change.
             store.Save(pending);
             State = pending;
             try {
-                host.CreatePlan(State.OwnedPlan);
+                host.CreatePlan(State.OwnedPlan, State.OriginalPlan);
                 host.ConfigurePlan(State.OwnedPlan, options);
                 host.Activate(State.OwnedPlan);
                 if (host.ActivePlan() != State.OwnedPlan) throw new IOException("Windows не применила план питания.");
