@@ -73,6 +73,7 @@ namespace OpenAntiLag {
                 catch (Exception error) { Console.Error.WriteLine(error); return 1; }
             }
             if (args.Length >= 2 && args[0] == "--preview") {
+                int previewExit=0;
                 Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
                 using (var e = new Engine(new FakeHost(), new MemoryStore())) {
                 if(args.Length > 2 && args[2] == "active") e.Enable(new ProfileOptions { GameMode=true, DisableCapture=true, DisableMouseAcceleration=true, CpuReady=true, PcieReady=true, Timer=true });
@@ -91,16 +92,17 @@ namespace OpenAntiLag {
                     var tick = new System.Windows.Forms.Timer { Interval = 600 };
                     tick.Tick += delegate {
                         tick.Stop();
+                        try {
                         if(args.Length>2&&args[2]=="advanced")((Panel)f.Controls.Find("profileOptionsScroll",true)[0]).AutoScrollPosition=new Point(0,10000);
                         if(args.Length>2&&args[2].StartsWith("shaders")){var list=(ListView)f.Controls.Find("shaderGames",true)[0];list.Items[0].Selected=true;list.Refresh();}
                         Console.WriteLine(WindowTheme.Inspect(f.Handle));
                         using (var bmp = new Bitmap(f.ClientSize.Width, f.ClientSize.Height)) { f.Controls[0].DrawToBitmap(bmp, new Rectangle(Point.Empty, f.ClientSize)); bmp.Save(args[1], System.Drawing.Imaging.ImageFormat.Png); }
                         CheckLayout(f);
-                        f.Close();
+                        }catch(Exception error){Console.Error.WriteLine(error);previewExit=1;}finally{f.Close();}
                     };
                     f.Shown += delegate { tick.Start(); }; Application.Run(f); tick.Dispose();
                 } }
-                return 0;
+                return previewExit;
             }
             try {
                 Test("Enable and exact rollback", delegate {
@@ -239,6 +241,7 @@ namespace OpenAntiLag {
         }
         static void CheckLayout(Control root) {
             foreach(Control c in root.Controls) {
+                if(!c.Visible)continue;
                 var card=c as OptionCard;
                 if(card!=null && card.GetPreferredSize(new Size(card.Width,0)).Height > card.Height+2) throw new Exception("Option clipped: "+card.Text+" "+card.Height+"/"+card.GetPreferredSize(new Size(card.Width,0)).Height);
                 var label=c as Label;
