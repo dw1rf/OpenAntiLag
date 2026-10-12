@@ -145,12 +145,12 @@ namespace OpenAntiLag {
                         CheckLayout(form); on.PerformClick();
                         await WaitUntil(delegate { return engine.State.Phase=="Enabled" && off.Enabled; });
                         Assert(!FindLabels(form).Any(x=>x.Text=="Нужно восстановление"||x.Text=="Нужна перезагрузка ПК"),"Safe profile incorrectly needs system recovery");
-                        Assert(!on.Enabled,"Enable should be disabled when active"); CheckLayout(form); off.PerformClick();
+                        Assert(on.Enabled&&((OptionCard)form.Controls.Find("advanced_hags",true)[0]).Enabled,"Active profile locked selection"); CheckLayout(form); off.PerformClick();
                         await WaitUntil(delegate { return engine.State.Phase=="Disabled" && on.Enabled; });
                         var hagsOption=(OptionCard)form.Controls.Find("advanced_hags",true)[0];hagsOption.Checked=true;on.PerformClick();await WaitUntil(()=>off.Enabled);
                         Assert(off.Text=="Отключить"&&!FindLabels(form).Any(x=>x.Text=="Восстановите старый профиль"),"New selected profile classified as legacy");off.PerformClick();await WaitUntil(()=>on.Enabled);Assert(!hagsOption.Checked,"HAGS checkbox not reset after restore");
                         form.ClientSize=new Size(630,560); form.PerformLayout(); CheckLayout(form);
-                        Assert(on.Bottom<=on.Parent.ClientSize.Height && off.Enabled==false,"Action state/layout invalid");
+                        Assert(on.Bottom<=on.Parent.ClientSize.Height && off.Enabled,"Action state/layout invalid");
                         var tabs=(TabControl)form.Controls.Find("mainTabs",true)[0];
                         for(int i=1;i<3;i++) { tabs.SelectedIndex=i; form.PerformLayout(); var mode=(ComboBox)tabs.TabPages[i].Controls.Find("gpuMode",true)[0]; var guide=(TextBox)tabs.TabPages[i].Controls.Find("gpuGuide",true)[0]; mode.SelectedIndex=1; Assert(guide.Text.Contains("РЕЖИМ: БЕЗ РАЗРЫВОВ"),"VRR guide did not change"); mode.SelectedIndex=0; Assert(guide.Text.Contains("РЕЖИМ: МИНИМАЛЬНАЯ ЗАДЕРЖКА"),"Esports guide did not change"); Assert(guide.Height>100 && guide.Width>400,"Guide not readable"); }
                         var gpuDevice=new FakeNvidiaDevice();var gpuStore=new MemoryNvidiaStore();bool locked=false;
@@ -173,9 +173,9 @@ namespace OpenAntiLag {
                                 legacyForm.Show();
                                 var legacyOn=(Button)legacyForm.Controls.Find("enable",true)[0];var legacyOff=(Button)legacyForm.Controls.Find("disable",true)[0];
                                 await WaitUntil(()=>legacyOff.Enabled);
-                                Assert(!legacyOn.Enabled&&legacyOff.Text=="Восстановить"&&FindLabels(legacyForm).Any(x=>x.Text=="Восстановите старый профиль"),"Migration prompt missing");
-                                legacyOff.PerformClick();await WaitUntil(()=>legacyEngine.State.Phase=="Disabled"&&!legacyOff.Enabled);
-                                Assert(!legacyOn.Enabled&&legacySystem.DisableCalls==1,"Missing reboot gate");
+                                Assert(legacyOn.Enabled&&legacyOff.Text=="Восстановить"&&FindLabels(legacyForm).Any(x=>x.Text=="Восстановите старый профиль"),"Migration prompt missing");
+                                legacyOff.PerformClick();await WaitUntil(()=>legacyEngine.State.Phase=="Disabled"&&legacyOn.Enabled);
+                                Assert(legacyOn.Enabled&&((OptionCard)legacyForm.Controls.Find("advanced_hags",true)[0]).Enabled&&legacySystem.DisableCalls==1,"Pending reboot locked controls");
                                 legacySystem.Pending=false;await legacyForm.RefreshState();
                                 Assert(legacyOn.Enabled,"Cannot enable after restart");legacyOn.PerformClick();await WaitUntil(()=>legacyEngine.State.Phase=="Enabled"&&legacyOff.Enabled);
                                 Assert(!legacyEngine.State.Options.CpuReady&&!legacyEngine.State.Options.PcieReady&&!legacyEngine.State.TimerRequested,"Legacy aggressive options carried into safe profile");
@@ -216,6 +216,20 @@ namespace OpenAntiLag {
                             slowForm.Close();
                         }
                         Console.WriteLine("PASS UI: background profile reading does not block GPU, real GPU exclusion remains");
+                        var restoreHost=new FakeHost();var restoreSystem=new TestSystemClient();
+                        using(var restoreEngine=new Engine(restoreHost,new MemoryStore()))using(var restoreForm=new MainForm(restoreEngine,false,true,restoreSystem)) {
+                            restoreForm.Show();var basic=(Button)restoreForm.Controls.Find("restoreBasic",true)[0];var resultLabel=(TextBox)restoreForm.Controls.Find("recoveryResult",true)[0];
+                            await WaitUntil(()=>((Button)restoreForm.Controls.Find("enable",true)[0]).Enabled);
+                            int originalWrites=restoreHost.Writes;basic.PerformClick();await WaitUntil(()=>resultLabel.Text.StartsWith("Сохранённого"));Assert(restoreHost.Writes==originalWrites,"Empty backup changed Windows");
+                            restoreEngine.Enable(ProfileOptions.Gaming());restoreSystem.FailState=true;await restoreForm.RefreshState();
+                            Assert(basic.Enabled&&((Button)restoreForm.Controls.Find("enable",true)[0]).Enabled&&((OptionCard)restoreForm.Controls.Find("advanced_hags",true)[0]).Enabled,"System state failure locked controls");
+                            restoreHost.Fail="write-game-mode";basic.PerformClick();await WaitUntil(()=>basic.Enabled&&resultLabel.Text.StartsWith("Восстановление основных не завершено"));
+                            Assert(restoreEngine.State.Phase=="Restoring","Failed restore lost recovery state");basic.PerformClick();await WaitUntil(()=>basic.Enabled&&restoreEngine.State.Phase=="Disabled");
+                            Assert(restoreSystem.DisableCalls==0&&restoreHost.Current==FakeHost.Original&&restoreHost.Values["game-mode"][0]==0,"Basic recovery touched system helper or failed restoration");
+                            restoreSystem.FailState=false;await restoreForm.RefreshState();Assert(((Button)restoreForm.Controls.Find("enable",true)[0]).Enabled,"Profile remains blocked after basic recovery");
+                            restoreForm.ClientSize=new Size(630,560);CheckLayout(restoreForm);Assert(basic.Bottom<=basic.Parent.ClientSize.Height,"Recovery button clipped");restoreForm.Close();
+                        }
+                        Console.WriteLine("PASS UI: basic recovery without machine journal, no-backup no-op, failure retry and profile re-enable");
                     } catch(Exception ex) { Console.Error.WriteLine(ex); result=1; }
                     form.Close();
                 };

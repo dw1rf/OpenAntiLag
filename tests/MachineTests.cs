@@ -28,10 +28,10 @@ namespace OpenAntiLag {
     }
     public sealed class TestSystemClient : IAdvancedSystemClient {
         public MachineState Value=new MachineState();
-        public bool CancelDisable,FailDisable,Pending;
+        public bool CancelDisable,FailDisable,Pending,FailState;
         public int DisableCalls;public string[] Selected;public bool CancelEnable;
         public void EnableSelected(string[] ids){if(CancelEnable)throw new OperationCanceledException();Selected=ids;Value.Version=2;Value.Phase="Enabled";}
-        public MachineState State {get{return Value;}}
+        public MachineState State {get{if(FailState)throw new IOException("System journal unavailable");return Value;}}
         public bool RebootPending {get{return Pending;}}
         public void Disable(){DisableCalls++;if(CancelDisable)throw new OperationCanceledException();if(FailDisable)throw new IOException("System restore failed");Value.Phase="Disabled";}
     }
