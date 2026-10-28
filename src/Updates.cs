@@ -45,7 +45,7 @@ namespace OpenAntiLag {
         static async Task<byte[]> Get(string address,long limit) {
             ServicePointManager.SecurityProtocol|=SecurityProtocolType.Tls12;
             using(var handler=new HttpClientHandler {AllowAutoRedirect=false})using(var client=new HttpClient(handler) {Timeout=TimeSpan.FromSeconds(45),MaxResponseContentBufferSize=limit}) {
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("OpenAntiLag/0.6.4");
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("OpenAntiLag/0.7.0");
                 Uri url=new Uri(address);
                 for(int n=0;n<6;n++) {
                     if(!Trusted(url))throw new InvalidDataException("Недопустимый адрес обновления.");

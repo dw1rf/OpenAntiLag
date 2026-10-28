@@ -12,6 +12,7 @@ namespace OpenAntiLag {
         readonly TextBox status=new TextBox {Name="amdStatus",Multiline=true,ReadOnly=true,Dock=DockStyle.Fill,ScrollBars=ScrollBars.Vertical,Height=70,BorderStyle=BorderStyle.None};
         readonly ProfileButton apply=new ProfileButton {Name="applyAmd",Text="Применить AMD",Primary=true},restore=new ProfileButton {Name="restoreAmd",Text="Восстановить AMD"},read=new ProfileButton {Name="readAmd",Text="Прочитать AMD"};
         readonly AmdProfiles controller;readonly Func<bool> acquire;readonly Action release;readonly bool preview,logging;
+        public event Action<string,bool> OperationCompleted;
         bool running,ready;
         public AmdPage(bool preview,Func<bool> acquire,Action release,AmdProfiles controller=null):base("AMD · Глобальные") {
             this.preview=preview;this.acquire=acquire;this.release=release;logging=controller==null&&!preview;
@@ -35,9 +36,9 @@ namespace OpenAntiLag {
             bool sync=mode.SelectedIndex==1,useAnti=anti.Checked;string gpu=devices.SelectedItem==null?null:((AmdGpu)devices.SelectedItem).Id;
             try {status.Text="Обращение к драйверу AMD…";
                 if(operation==0){var list=await Task.Run(()=>controller.Devices());if(IsDisposed)return;devices.Items.Clear();foreach(var d in list)devices.Items.Add(d);devices.SelectedIndex=list.FindIndex(d=>d.Id==gpu);if(devices.SelectedIndex<0&&list.Count>0)devices.SelectedIndex=0;gpu=devices.SelectedItem==null?null:((AmdGpu)devices.SelectedItem).Id;if(gpu==null)throw new NotSupportedException("Совместимая Radeon не найдена.");}
-                string result=await Task.Run(()=>operation==0?controller.Inspect(gpu):operation==1?controller.Apply(gpu,useAnti,sync):controller.Restore());ready=true;
+                string result=await Task.Run(()=>operation==0?controller.Inspect(gpu):operation==1?controller.Apply(gpu,useAnti,sync):controller.Restore());ready=true;if(operation!=0&&OperationCompleted!=null)OperationCompleted(result,true);
                 if(!IsDisposed){if(operation==0){body.Text=result+"\r\n"+AmdProfiles.Guide(sync,useAnti);status.Text="Параметры прочитаны. Неподдерживаемые функции будут пропущены.";}else status.Text=result;}if(logging&&operation!=0)Program.Log(result);
-            }catch(Exception ex){if(operation==0)ready=false;if(!IsDisposed)status.Text=ex.Message;if(logging)Program.Log("AMD: "+ex.Message);}
+            }catch(Exception ex){if(OperationCompleted!=null)OperationCompleted(ex.Message,false);if(operation==0)ready=false;if(!IsDisposed)status.Text=ex.Message;if(logging)Program.Log("AMD: "+ex.Message);}
             finally{running=false;release();if(!IsDisposed){devices.Enabled=mode.Enabled=anti.Enabled=read.Enabled=true;apply.Enabled=restore.Enabled=ready;}}
         }
     }

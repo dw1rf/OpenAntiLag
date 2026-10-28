@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
@@ -24,7 +24,7 @@ namespace OpenAntiLag {
         }
     }
     public class ProfileButton : Button {
-        public bool Primary;
+        public bool Primary;public bool Quiet;
         bool hover;
         protected override void OnMouseEnter(EventArgs e) {hover=true;Invalidate();base.OnMouseEnter(e);}
         protected override void OnMouseLeave(EventArgs e) {hover=false;Invalidate();base.OnMouseLeave(e);}
@@ -33,7 +33,7 @@ namespace OpenAntiLag {
             e.Graphics.Clear(Parent == null ? Theme.Background : Parent.BackColor); e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;
             Color fill = Enabled && Primary ? Theme.Accent : Theme.Surface;
             Color text = Enabled && Primary ? Theme.Text : Theme.Muted;
-            Theme.Fill(e.Graphics,new Rectangle(0,0,Width-1,Height-1),fill,Enabled ? Theme.Accent : Theme.Border,8);
+            Theme.Fill(e.Graphics,new Rectangle(0,0,Width-1,Height-1),fill,Enabled&&!Quiet ? Theme.Accent : Theme.Border,8);
             if(Enabled&&Primary)using(var path=Theme.Round(new Rectangle(0,0,Width-1,Height-1),8))using(var brush=new LinearGradientBrush(ClientRectangle,Color.FromArgb(62,3,24),hover?Color.FromArgb(225,13,72):Theme.Accent,LinearGradientMode.Vertical))e.Graphics.FillPath(brush,path);
             TextRenderer.DrawText(e.Graphics,Text,Font,ClientRectangle,text,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.NoPrefix);
             if (Focused && ShowFocusCues) ControlPaint.DrawFocusRectangle(e.Graphics,Rectangle.Inflate(ClientRectangle,-6,-6),text,fill);
@@ -52,7 +52,7 @@ namespace OpenAntiLag {
     public sealed class OptionCard : CheckBox {
         public string Description { get; set; }
         public bool Compact { get; set; }
-        float ScaleFactor { get { return Font.Size / 10.0f; } }
+        float ScaleFactor { get { return Font.Size / 10.0f * DeviceDpi / 96.0f; } }
         int D(int x) { return (int)Math.Round(x*ScaleFactor); }
         public OptionCard() { AutoSize=true; SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer,true); Cursor=Cursors.Hand; AccessibleRole=AccessibleRole.CheckButton; }
         public override Size GetPreferredSize(Size proposed) {

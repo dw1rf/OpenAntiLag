@@ -44,6 +44,12 @@ namespace OpenAntiLag {
         static void Throws(Action action) { bool threw = false; try { action(); } catch { threw = true; } Assert(threw, "Expected failure"); }
         static void Test(string name, Action action) { action(); Console.WriteLine("PASS " + name); count++; }
         [STAThread] public static int Main(string[] args) {
+            if(args.Length==1&&args[0]=="--network-local-check") {
+                try {var ct=System.Threading.CancellationToken.None;var transport=new SystemProbeTransport();var ping=transport.Ping(System.Net.IPAddress.Loopback,800,ct).GetAwaiter().GetResult();Console.WriteLine("Loopback ICMP: "+ping.Detail);var listener=new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback,0);listener.Start();try{int port=((System.Net.IPEndPoint)listener.LocalEndpoint).Port;var tcp=transport.Tcp(System.Net.IPAddress.Loopback,port,1000,ct).GetAwaiter().GetResult();Assert(tcp.Success,"Local TCP probe failed");Console.WriteLine("PASS loopback TCP connect");}finally{listener.Stop();}var performance=new PerformanceMonitor();performance.Run(0,5,1000,ct).GetAwaiter().GetResult();var readings=performance.Snapshot();Assert(readings.Any(s=>s.CpuPercent.HasValue)&&readings.Any(s=>s.RamTotal>0),"CPU/RAM native APIs failed");Console.WriteLine("PASS native CPU/RAM read-only samples="+readings.Length);return 0;}catch(Exception error){Console.Error.WriteLine(error);return 1;}
+            }
+            if(args.Length==1&&args[0]=="--network-read-check") {
+                try {var adapters=NetworkAdapters.Read();Console.WriteLine("Read-only adapters="+adapters.Length);Console.WriteLine("Process endpoints="+GameConnections.Read().Count);var host=new WindowsNetworkHost();foreach(var adapter in adapters.Where(a=>a.Type!="Loopback"))foreach(int family in new[]{4,6})try{var dns=host.ReadDns(adapter.Id,family);Console.WriteLine(adapter.Name+" IPv"+family+" DNS automatic="+dns.Automatic+" static="+String.Join(",",dns.Servers));}catch(Exception error){Console.WriteLine("DNS read limitation: "+error.Message);}Console.WriteLine(WindowsNetworkHost.Capability("DNS"));Console.WriteLine(WindowsNetworkHost.Capability("QoS"));return 0;}catch(Exception error){Console.Error.WriteLine(error);return 1;}
+            }
             if(args.Length==2&&args[0]=="--shader-fixture")return ShaderTests.Fixture(args[1]);
             if(args.Length==3&&args[0]=="--shader-module-check")return ShaderTests.ModuleCheck(args[1],args[2]);
             if(args.Length==2&&args[0]=="--shader-scan") {try {var module=new ShaderEngine(args[1]);var result=module.Run("scan",null,Console.WriteLine,System.Threading.CancellationToken.None).GetAwaiter().GetResult();Console.WriteLine("Parsed games: "+ShaderProtocol.Games(result).Count);return 0;}catch(Exception ex){Console.Error.WriteLine(ex);return 1;}}
@@ -67,17 +73,34 @@ namespace OpenAntiLag {
             if(args.Length==1&&args[0]=="--nvidia-read") { try { Console.WriteLine(new NvidiaController(()=>new NvidiaDriver(),new NvidiaStore(Path.Combine(Program.DataDirectory,"nvidia-backup.xml"))).Inspect(NvidiaPreset.Build(false,0,false,false))); return 0; } catch(Exception ex) {Console.Error.WriteLine(ex);return 1;} }
             if(args.Length==2&&args[0]=="--export-gpu") { Directory.CreateDirectory(args[1]); foreach(bool amd in new[]{false,true}) foreach(bool smooth in new[]{false,true}) File.WriteAllText(Path.Combine(args[1],(amd?"AMD":"NVIDIA-617.42")+(smooth?"-VRR":"-Esports")+".txt"),GpuConfigs.Guide(amd,smooth),new System.Text.UTF8Encoding(true)); return 0; }
             if(args.Length==1&&args[0]=="--fetch-latest") {try {var package=Updates.Download(new Version(0,0,0,0)).GetAwaiter().GetResult();Console.WriteLine(package==null?"No release":"Verified GitHub download: "+package.Version+" SHA256 "+package.Hash);return 0;}catch(Exception error){Console.Error.WriteLine(error);return 1;}}
+            if(args.Length>=1&&args[0]=="--input-fixture") {
+                Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
+                using(var e=new Engine(new FakeHost(),new MemoryStore()))using(var f=new MainForm(e,false,true,null,true)) {
+                    f.Text="OpenAntiLag input fixture";
+                    foreach(var option in FindOptions(f)) {var box=option;box.CheckedChanged+=delegate{Console.WriteLine("CHECK "+box.Text+"="+box.Checked);Console.Out.Flush();};}
+                    if(args.Length>1&&args[1]=="small")f.ClientSize=new Size(630,560);
+                    Application.Run(f);
+                }return 0;
+            }
+            if(args.Length==1&&args[0]=="--player-ui-check")return PlayerUiCheck();
             if(args.Length == 1 && args[0] == "--ui-check") return UiCheck();
             if (args.Length == 1 && args[0] == "--inspect") {
                 try { var host = new WindowsHost(); Console.WriteLine("Read-only Windows adapter check"); Console.WriteLine("Power plan: " + host.ActivePlan()); foreach (string id in Settings.Selected(ProfileOptions.Gaming())) { var value = host.ReadSetting(id); Console.WriteLine(id + ": " + (value == null ? "absent" : String.Join(",", value))); } return 0; }
                 catch (Exception error) { Console.Error.WriteLine(error); return 1; }
+            }
+            if(args.Length>=2&&args[0]=="--player-preview") {
+                Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);int result=0;
+                using(var e=new Engine(new FakeHost(),new MemoryStore()))using(var f=new MainForm(e,false,true)) {
+                    var context=f.Workspace.Context;context.Preferences.Games.Add(new InstalledGame {Id="steam:730",Name="Counter-Strike 2 · предпросмотр"});context.Preferences.SelectedGame="steam:730";
+                    var tick=new System.Windows.Forms.Timer {Interval=700};tick.Tick+=delegate{tick.Stop();try{if(args.Length>2)f.Workspace.Navigation.ShowPage(args[2]);f.PerformLayout();using(var bitmap=new Bitmap(f.ClientSize.Width,f.ClientSize.Height)){f.Workspace.DrawToBitmap(bitmap,new Rectangle(Point.Empty,f.ClientSize));bitmap.Save(args[1],System.Drawing.Imaging.ImageFormat.Png);}}catch(Exception error){Console.Error.WriteLine(error);result=1;}finally{f.Close();}};f.Shown+=delegate{tick.Start();};Application.Run(f);tick.Dispose();
+                }return result;
             }
             if (args.Length >= 2 && args[0] == "--preview") {
                 int previewExit=0;
                 Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
                 using (var e = new Engine(new FakeHost(), new MemoryStore())) {
                 if(args.Length > 2 && args[2] == "active") e.Enable(new ProfileOptions { GameMode=true, DisableCapture=true, DisableMouseAcceleration=true, CpuReady=true, PcieReady=true, Timer=true });
-                using (var f = new MainForm(e, false, true)) {
+                using (var f = new MainForm(e, false, true,null,true)) {
                     if(args.Length > 2 && (args[2] == "small"||args[2]=="shaders-small")) f.ClientSize = new Size(630,560);
                     if(args.Length>2&&args[2]=="advanced")f.ClientSize=new Size(800,1400);
                     if(args.Length > 3) {
@@ -89,6 +112,7 @@ namespace OpenAntiLag {
                     }
                     if(args.Length>2 && (args[2]=="nvidia" || args[2]=="amd")) ((TabControl)f.Controls.Find("mainTabs",true)[0]).SelectedIndex=args[2]=="amd"?2:1;
                     if(args.Length>2 && args[2].StartsWith("shaders")) ((TabControl)f.Controls.Find("mainTabs",true)[0]).SelectedIndex=3;
+                    var newPages=new[]{"network","traffic","dns","statistics"};if(args.Length>2&&Array.IndexOf(newPages,args[2])>=0)((TabControl)f.Controls.Find("mainTabs",true)[0]).SelectedIndex=4+Array.IndexOf(newPages,args[2]);
                     var tick = new System.Windows.Forms.Timer { Interval = 600 };
                     tick.Tick += delegate {
                         tick.Stop();
@@ -125,7 +149,7 @@ namespace OpenAntiLag {
                     try { var store = new XmlStateStore(Path.Combine(dir,"state.xml")); store.Save(new ProfileState()); store.Save(new ProfileState { Phase = "Enabled", OriginalPlan = FakeHost.Original, OwnedPlan = Guid.NewGuid().ToString() }); Assert(store.Load().Phase == "Enabled", "Save failed"); File.WriteAllText(Path.Combine(dir,"state.xml"), "broken XML"); Throws(delegate { store.Load(); }); }
                     finally { if (Directory.Exists(dir)) Directory.Delete(dir,true); }
                 });
-                ProfileTests(); count += MachineTests.Run(); count += UpdateTests.Run(); count += NvidiaTests.Run();count += AmdTests.Run();count += ShaderTests.Run();                Test("UAC launches on STA with exact path and working directory",delegate {ElevatedProcess.Run(System.Windows.Forms.Application.ExecutablePath,"--machine check test",delegate(System.Diagnostics.ProcessStartInfo info){Assert(System.Threading.Thread.CurrentThread.GetApartmentState()==System.Threading.ApartmentState.STA,"Not STA");Assert(info.Verb=="runas"&&info.UseShellExecute&&info.WorkingDirectory==Path.GetDirectoryName(info.FileName)&&info.Arguments=="--machine check test","Wrong UAC request");return 0;});});
+                ProfileTests(); count += MachineTests.Run(); count += UpdateTests.Run(); count += NvidiaTests.Run();count += AmdTests.Run();count += ShaderTests.Run();count += NetworkTests.Run();count += PlayerTests.Run();                Test("UAC launches on STA with exact path and working directory",delegate {ElevatedProcess.Run(System.Windows.Forms.Application.ExecutablePath,"--machine check test",delegate(System.Diagnostics.ProcessStartInfo info){Assert(System.Threading.Thread.CurrentThread.GetApartmentState()==System.Threading.ApartmentState.STA,"Not STA");Assert(info.Verb=="runas"&&info.UseShellExecute&&info.WorkingDirectory==Path.GetDirectoryName(info.FileName)&&info.Arguments=="--machine check test","Wrong UAC request");return 0;});});
                 Test("UAC cancellation remains cancellation",delegate {try {ElevatedProcess.Run(System.Windows.Forms.Application.ExecutablePath,"test",delegate {throw new System.ComponentModel.Win32Exception(1223);});throw new Exception("Expected cancellation");}catch(OperationCanceledException){}});
                 Test("UAC unknown native error is actionable",delegate {try {ElevatedProcess.Run(System.Windows.Forms.Application.ExecutablePath,"test",delegate {throw new System.ComponentModel.Win32Exception(-2);});throw new Exception("Expected launch failure");}catch(IOException ex){Assert(ex.Message.Contains("0xFFFFFFFE")&&ex.InnerException is System.ComponentModel.Win32Exception,"Lost diagnostic");}});
                 Console.WriteLine(count + " tests passed. No real system settings changed."); return 0;
@@ -136,7 +160,7 @@ namespace OpenAntiLag {
         static int UiCheck() {
             Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false); int result=0;
             using(var engine=new Engine(new FakeHost(),new MemoryStore()))
-            using(var form=new MainForm(engine,false,true)) {
+            using(var form=new MainForm(engine,false,true,null,true)) {
                 var tick=new System.Windows.Forms.Timer { Interval=800 };
                 tick.Tick+=async delegate {
                     tick.Stop();
@@ -171,7 +195,7 @@ namespace OpenAntiLag {
                             legacyEngine.Enable(new ProfileOptions {CpuReady=true,PcieReady=true,Timer=true});
                             legacyEngine.State.SchemaVersion=2;
                             var legacySystem=new TestSystemClient {Pending=true};legacySystem.Value.Phase="Enabled";
-                            using(var legacyForm=new MainForm(legacyEngine,false,true,legacySystem)) {
+                            using(var legacyForm=new MainForm(legacyEngine,false,true,legacySystem,true)) {
                                 legacyForm.Show();
                                 var legacyOn=(Button)legacyForm.Controls.Find("enable",true)[0];var legacyOff=(Button)legacyForm.Controls.Find("disable",true)[0];
                                 await WaitUntil(()=>legacyOff.Enabled);
@@ -207,7 +231,7 @@ namespace OpenAntiLag {
                             CheckLayout(shaderPage);tabs.TabPages.Remove(shaderPage);
                         }
                         Console.WriteLine("PASS UI: shader scan, unsupported game guard, compile, shared operation lock and cancellation");
-                        var slowHost=new FakeHost();using(var slowEngine=new Engine(slowHost,new MemoryStore()))using(var slowForm=new MainForm(slowEngine,false,true)) {
+                        var slowHost=new FakeHost();using(var slowEngine=new Engine(slowHost,new MemoryStore()))using(var slowForm=new MainForm(slowEngine,false,true,null,true)) {
                             slowEngine.Enable(ProfileOptions.Gaming());slowForm.Show();await Task.Delay(100);await slowForm.RefreshState();
                             using(var entered=new System.Threading.ManualResetEventSlim())using(var finish=new System.Threading.ManualResetEventSlim()) {
                                 slowHost.BeforeActivePlan=()=>{entered.Set();finish.Wait(5000);};var refresh=slowForm.RefreshState();
@@ -219,7 +243,7 @@ namespace OpenAntiLag {
                         }
                         Console.WriteLine("PASS UI: background profile reading does not block GPU, real GPU exclusion remains");
                         var restoreHost=new FakeHost();var restoreSystem=new TestSystemClient();
-                        using(var restoreEngine=new Engine(restoreHost,new MemoryStore()))using(var restoreForm=new MainForm(restoreEngine,false,true,restoreSystem)) {
+                        using(var restoreEngine=new Engine(restoreHost,new MemoryStore()))using(var restoreForm=new MainForm(restoreEngine,false,true,restoreSystem,true)) {
                             restoreForm.Show();var basic=(Button)restoreForm.Controls.Find("restoreBasic",true)[0];var resultLabel=(TextBox)restoreForm.Controls.Find("recoveryResult",true)[0];
                             await WaitUntil(()=>((Button)restoreForm.Controls.Find("enable",true)[0]).Enabled);
                             int originalWrites=restoreHost.Writes;basic.PerformClick();await WaitUntil(()=>resultLabel.Text.StartsWith("Сохранённого"));Assert(restoreHost.Writes==originalWrites,"Empty backup changed Windows");
@@ -232,12 +256,41 @@ namespace OpenAntiLag {
                             restoreForm.ClientSize=new Size(630,560);CheckLayout(restoreForm);Assert(basic.Bottom<=basic.Parent.ClientSize.Height,"Recovery button clipped");restoreForm.Close();
                         }
                         Console.WriteLine("PASS UI: basic recovery without machine journal, no-backup no-op, failure retry and profile re-enable");
+                        foreach(float scale in new[]{1f,1.25f,1.5f,2f})using(var scaledEngine=new Engine(new FakeHost(),new MemoryStore()))using(var scaledForm=new MainForm(scaledEngine,false,true,null,true)) {
+                            scaledForm.Show();scaledForm.ClientSize=new Size(800,930);var fonts=new Dictionary<Control,Font>();CaptureFonts(scaledForm,fonts);scaledForm.Scale(new SizeF(scale,scale));foreach(var pair in fonts)pair.Key.Font=new Font(pair.Value.FontFamily,pair.Value.Size*scale,pair.Value.Style);scaledForm.PerformLayout();
+                            var scaledTabs=(TabControl)scaledForm.Controls.Find("mainTabs",true)[0];Assert(scaledTabs.TabCount==8,"New modules missing");
+                            for(int index=4;index<8;index++){scaledTabs.SelectedIndex=index;scaledForm.PerformLayout();CheckLayout(scaledTabs.TabPages[index]);Assert(scaledTabs.TabPages[index].Enabled,"Diagnostic page disabled");}
+                            scaledForm.Close();
+                        }
+                        Console.WriteLine("PASS UI: all network modules, wrapping tabs and 100/125/150/200 percent scaling");
+                        var probe=new FakeProbeTransport();var uiMonitor=new NetworkMonitor(probe,()=>new AdapterSnapshot[0]);using(var page=new NetworkPage(false,uiMonitor)) {
+                            tabs.TabPages.Add(page);tabs.SelectedTab=page;var start=(Button)page.Controls.Find("Начать измерение",true)[0];start.PerformClick();await Task.Delay(50);Assert(probe.Calls==0,"Network started without consent");Assert(((Label)page.Controls.Find("toolStatus",true)[0]).Text.Contains("Разрешите"),"Missing consent error");tabs.TabPages.Remove(page);
+                        }
+                        Console.WriteLine("PASS UI: network refuses unapproved probes and remains responsive");
                     } catch(Exception ex) { Console.Error.WriteLine(ex); result=1; }
                     form.Close();
                 };
                 form.Shown+=delegate { tick.Start(); }; Application.Run(form); tick.Dispose();
             }
             return result;
+        }
+        static int PlayerUiCheck() {
+            Control.CheckForIllegalCrossThreadCalls=true;Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);int result=0;
+            using(var engine=new Engine(new FakeHost(),new MemoryStore()))using(var form=new MainForm(engine,false,true)) {
+                var context=form.Workspace.Context;context.Preferences.Games.Add(new InstalledGame {Id="steam:730",Name="Counter-Strike 2 · UI fixture"});context.Preferences.SelectedGame="steam:730";
+                var timer=new System.Windows.Forms.Timer {Interval=700};timer.Tick+=async delegate {timer.Stop();try {
+                    await WaitUntil(()=>context.Initialized);context.Notice="Background UI dispatch fixture";await Task.Run(()=>context.Emit());var primary=(Button)form.Controls.Find("playerPrimary",true)[0];Assert(primary.Enabled,"Dashboard action disabled");primary.PerformClick();await WaitUntil(()=>engine.State.Phase=="Enabled"&&!context.Optimizer.Status.Busy);Assert(primary.Text=="Отключить оптимизацию","Primary did not reflect applied backend state");primary.PerformClick();await WaitUntil(()=>engine.State.Phase=="Disabled"&&!context.Optimizer.Status.Busy);
+                    foreach(string page in new[]{"Home","Games","Optimization","Results","Settings","Recovery","Internet"}){form.Workspace.Navigation.ShowPage(page);form.PerformLayout();CheckLayout(form.Workspace);}
+                    foreach(float scale in new[]{1f,1.25f,1.5f,2f})using(var scaledEngine=new Engine(new FakeHost(),new MemoryStore()))using(var scaled=new MainForm(scaledEngine,false,true)) {
+                        scaled.Show();await WaitUntil(()=>scaled.Workspace.Context.Initialized);scaled.ClientSize=new Size(1020,700);var fonts=new Dictionary<Control,Font>();CaptureFonts(scaled,fonts);scaled.Scale(new SizeF(scale,scale));foreach(var pair in fonts)pair.Key.Font=new Font(pair.Value.FontFamily,pair.Value.Size*scale,pair.Value.Style);scaled.PerformLayout();
+                        foreach(string page in new[]{"Home","Games","Optimization","Results","Settings","Recovery","Internet"}){scaled.Workspace.Navigation.ShowPage(page);scaled.PerformLayout();CheckLayout(scaled.Workspace);}
+                        scaled.Close();
+                    }
+                    foreach(int index in new[]{0,1,2,3,4,5,6,7}){form.Workspace.ShowExpert(index,"Technical fixture");form.PerformLayout();var tools=(TabControl)form.Controls.Find("mainTabs",true)[0];Assert(tools.SelectedIndex==index,"Professional module inaccessible");Assert(tools.Top<0,"Technical tab bar was not hidden");CheckLayout(tools.TabPages[index]);}
+                    using(var wizard=new SetupWizard(context)){wizard.Show(form);var skip=(Button)wizard.Controls.Find("Пропустить",true)[0];skip.PerformClick();Assert(context.Preferences.SetupComplete,"Wizard skip did not persist completion");}
+                    Console.WriteLine("PASS player UI: real fake-host apply/disable, seven routes, eight preserved modules, wizard skip, 100/125/150/200 scaling");
+                }catch(Exception error){Console.Error.WriteLine(error);result=1;}finally{form.Close();}};form.Shown+=delegate{timer.Start();};Application.Run(form);timer.Dispose();
+            }return result;
         }
         static void CheckLayout(Control root) {
             foreach(Control c in root.Controls) {
@@ -252,6 +305,7 @@ namespace OpenAntiLag {
                 CheckLayout(c);
             }
         }
+        static IEnumerable<OptionCard> FindOptions(Control root) {foreach(Control child in root.Controls){var option=child as OptionCard;if(option!=null)yield return option;foreach(var nested in FindOptions(child))yield return nested;}}
         static IEnumerable<Label> FindLabels(Control root) {
             foreach(Control child in root.Controls) {var label=child as Label;if(label!=null)yield return label;foreach(var nested in FindLabels(child))yield return nested;}
         }

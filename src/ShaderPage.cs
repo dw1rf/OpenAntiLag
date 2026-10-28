@@ -8,6 +8,7 @@ using System.Windows.Forms;
 
 namespace OpenAntiLag {
     public sealed class ShaderPage : TabPage {
+        public event Action<string,bool> OperationCompleted;
         readonly ShaderEngine engine;
         readonly Func<bool> acquire;readonly Action release;readonly bool preview;
         readonly ListView games=new ListView {Name="shaderGames",View=View.Details,FullRowSelect=true,MultiSelect=true,HideSelection=false,Dock=DockStyle.Fill,BackColor=Theme.Surface,ForeColor=Theme.Text,BorderStyle=BorderStyle.None};
@@ -70,9 +71,9 @@ namespace OpenAntiLag {
         async Task Work(Func<CancellationToken,Task> action,string message) {
             if(preview||running)return;if(!acquire()){status.Text="Дождитесь завершения другой операции Open AntiLag.";return;}
             running=true;cancellation=new CancellationTokenSource();progress.Visible=true;status.Text=message;UpdateButtons();
-            try {await action(cancellation.Token);if(!IsDisposed)status.Text="Операция завершена. Результат показан в списке и журнале.";}
+            try {await action(cancellation.Token);if(!IsDisposed)status.Text="Операция завершена. Результат показан в списке и журнале.";if(OperationCompleted!=null)OperationCompleted("Операция модуля шейдеров подтверждена. Подробности — в разделе шейдеров.",true);}
             catch(OperationCanceledException){if(!IsDisposed)status.Text="Остановлено. Повторная подготовка доступна по кнопке.";}
-            catch(Exception error){Log(error.Message);if(!IsDisposed)status.Text="Не завершено: "+error.Message;Program.Log("Shaders: "+error.Message);}
+            catch(Exception error){if(OperationCompleted!=null)OperationCompleted(error.Message,false);Log(error.Message);if(!IsDisposed)status.Text="Не завершено: "+error.Message;Program.Log("Shaders: "+error.Message);}
             finally {cancellation.Dispose();cancellation=null;running=false;release();if(!IsDisposed){progress.Visible=false;UpdateButtons();}}
         }
         protected override void Dispose(bool disposing){if(disposing&&cancellation!=null)cancellation.Cancel();base.Dispose(disposing);}

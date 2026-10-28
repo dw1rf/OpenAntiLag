@@ -11,6 +11,8 @@ namespace OpenAntiLag {
         readonly Engine engine;
         readonly ISystemClient system;
         readonly ProfileController controller;
+        PlayerWorkspace workspace;
+        public PlayerWorkspace Workspace {get{return workspace;}}
         readonly bool preview, startHidden;
         readonly Label status=new Label(), detail=new Label();
         readonly OptionCard gameMode=new OptionCard(), capture=new OptionCard(), mouse=new OptionCard(), cpu=new OptionCard(), pcie=new OptionCard(), timer=new OptionCard(), startup=new OptionCard { Compact=true };
@@ -26,7 +28,7 @@ namespace OpenAntiLag {
         readonly OptionCard autoUpdate=new OptionCard {Compact=true};
         UpdatePackage pendingUpdate;
         DateTime nextUpdate=DateTime.UtcNow;
-        public MainForm(Engine engine,bool startHidden,bool preview,ISystemClient systemClient=null) {
+        public MainForm(Engine engine,bool startHidden,bool preview,ISystemClient systemClient=null,bool legacyUi=false) {
             this.engine=engine; this.preview=preview; this.startHidden=startHidden;
             system=systemClient ?? (preview ? (ISystemClient)new PreviewSystemClient() : new SystemClient());
             controller=new ProfileController(engine,system);
@@ -39,7 +41,7 @@ namespace OpenAntiLag {
             var header=new TableLayoutPanel { Dock=DockStyle.Fill, AutoSize=true, ColumnCount=2, Margin=new Padding(0,0,0,20) };
             header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100)); header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             header.Controls.Add(Label("Open AntiLag",24,Theme.Text,true),0,0);
-            var version=Label("v0.6.4",10,Theme.Muted,false); version.Anchor=AnchorStyles.Right; header.Controls.Add(version,1,0);
+            var version=Label("v0.7.0",10,Theme.Muted,false); version.Anchor=AnchorStyles.Right; header.Controls.Add(version,1,0);
             var subtitle=Label("Твой игровой профиль. Под контролем.",10,Theme.Muted,false); header.Controls.Add(subtitle,0,1); header.SetColumnSpan(subtitle,2); root.Controls.Add(header,0,0);
             var stateCard=new GradientCard { Dock=DockStyle.Fill, AutoSize=true, ColumnCount=1, BackColor=Theme.Background, Padding=new Padding(18,14,18,14), Margin=new Padding(0,0,0,20) };
             stateCard.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
@@ -84,7 +86,7 @@ namespace OpenAntiLag {
             startup.Text="Запускать с Windows"; startup.Dock=DockStyle.Fill; startup.Checked=!preview && Startup.Enabled; startup.Margin=Padding.Empty; footer.Controls.Add(startup,0,0);
             startup.CheckedChanged+=delegate { if(initializing||preview)return; try { Startup.Enabled=startup.Checked; } catch(Exception error) { initializing=true; startup.Checked=!startup.Checked; initializing=false; Report(error); } };
             footer.Controls.Add(Link("Журнал",delegate { if(!preview) { Directory.CreateDirectory(Program.DataDirectory); Process.Start("explorer.exe","\""+Program.DataDirectory+"\""); } }),1,0);
-            footer.Controls.Add(Link("О программе",delegate { MessageBox.Show(this,"Open AntiLag 0.6.4 • MIT\nМодуль шейдеров: отдельный SCSKiller 1.2.5, GPL-3.0-or-later и исключения.\nhttps://github.com/BlueHeisenberg/SCSKiller\n\nИсходные значения сохраняются до изменений. Внешние изменения пользователя при откате сохраняются.\n\nПрофиль не гарантирует прирост FPS или нулевую задержку. Настройки Xbox зависят от версии Windows. Таймер 1 мс не является универсальной оптимизацией игр.\n\nBCD, HAGS и системные приоритеты доступны по отдельным галочкам, выключенным по умолчанию. Требуют UAC и перезагрузки. Старые профили можно восстановить. Питание копируется из текущего плана; дополнительные опции требуют отдельного выбора.","Open AntiLag",MessageBoxButtons.OK,MessageBoxIcon.Information); }),2,0); root.Controls.Add(footer,0,4);
+            footer.Controls.Add(Link("О программе",delegate { MessageBox.Show(this,"Open AntiLag 0.7.0 • MIT\nМодуль шейдеров: отдельный SCSKiller 1.2.5, GPL-3.0-or-later и исключения.\nhttps://github.com/BlueHeisenberg/SCSKiller\n\nИсходные значения сохраняются до изменений. Внешние изменения пользователя при откате сохраняются.\n\nПрофиль не гарантирует прирост FPS или нулевую задержку. Настройки Xbox зависят от версии Windows. Таймер 1 мс не является универсальной оптимизацией игр.\n\nBCD, HAGS и системные приоритеты доступны по отдельным галочкам, выключенным по умолчанию. Требуют UAC и перезагрузки. Старые профили можно восстановить. Питание копируется из текущего плана; дополнительные опции требуют отдельного выбора.","Open AntiLag",MessageBoxButtons.OK,MessageBoxIcon.Information); }),2,0); root.Controls.Add(footer,0,4);
             autoUpdate.Text="Автообновления"; autoUpdate.Dock=DockStyle.Fill; autoUpdate.Margin=Padding.Empty;autoUpdate.Checked=preview||Updates.Enabled;
             footer.Controls.Add(autoUpdate,0,1);
             autoUpdate.CheckedChanged+=delegate {if(initializing||preview)return;try {Updates.Enabled=autoUpdate.Checked;if(!autoUpdate.Checked)pendingUpdate=null;}catch(Exception error){Report(error);} };
@@ -92,19 +94,32 @@ namespace OpenAntiLag {
             updateStatus.Text="Обновления из GitHub Releases";updateStatus.ForeColor=Theme.Muted;updateStatus.Font=new Font(Font.FontFamily,9);updateStatus.AutoSize=true;updateStatus.Dock=DockStyle.Fill;updateStatus.Margin=new Padding(0,2,0,0);footer.Controls.Add(updateStatus,0,2);footer.SetColumnSpan(updateStatus,3);
             var menu=new ContextMenuStrip { BackColor=Theme.Surface, ForeColor=Theme.Text };
             menu.Items.Add("Открыть",null,delegate { Reveal(); });
-            menu.Items.Add("Выход",null,delegate { if(busy||gpuBusy)return; if(MessageBox.Show(this,"Выход не отключает профиль. Для отката сначала нажмите «Отключить».\n\nВыйти?","Open AntiLag",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)return; exiting=true; Close(); });
+            menu.Items.Add("Выход",null,async delegate { if(busy||gpuBusy)return; if(MessageBox.Show(this,"Автоматический профиль игры и ограничения трафика будут восстановлены. Вручную применённый профиль Windows отключите отдельно.\n\nВыйти?","Open AntiLag",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)return; busy=true;try {if(workspace!=null)await workspace.PrepareExit();if(!preview)await Task.Run(()=>new NetworkClient().RestoreQosOnExit());exiting=true;Close();}catch(Exception error){recoveryResult.Text="Выход отложен: "+error.Message;Reveal();if(MessageBox.Show(this,"Восстановление сетевых политик не завершено. Журнал сохранён.\n\nВыйти без восстановления? Политики QoS могут оставаться до восстановления или перезагрузки.\n"+error.Message,"Выход",MessageBoxButtons.YesNo,MessageBoxIcon.Warning,MessageBoxDefaultButton.Button2)==DialogResult.Yes){exiting=true;Close();}}finally{busy=false;} });
             tray=new NotifyIcon { Icon=Icon,Text="Open AntiLag",ContextMenuStrip=menu,Visible=!preview }; tray.DoubleClick+=delegate { Reveal(); };
             FormClosing+=delegate(object sender,FormClosingEventArgs e) { if(!exiting && !preview && e.CloseReason==CloseReason.UserClosing) { e.Cancel=true; Hide(); } };
-            Resize+=delegate {bool compact=ClientSize.Height<700;header.Visible=!compact;detail.Visible=!compact;root.Padding=new Padding(compact?12:24);header.Margin=new Padding(0,0,0,compact?6:20);subtitle.Visible=!compact;stateCard.Padding=new Padding(compact?12:18,compact?8:14,compact?12:18,compact?8:14);stateCard.Margin=new Padding(0,0,0,compact?8:20);};
+            Resize+=delegate {bool compact=ClientSize.Height*96.0/DeviceDpi<700;header.Visible=!compact;detail.Visible=!compact;root.Padding=new Padding(compact?12:24);header.Margin=new Padding(0,0,0,compact?6:20);subtitle.Visible=!compact;stateCard.Padding=new Padding(compact?12:18,compact?8:14,compact?12:18,compact?8:14);stateCard.Margin=new Padding(0,0,0,compact?8:20);};
             Resize+=delegate { if(WindowState==FormWindowState.Minimized&&!preview)Hide(); };
             poll=new System.Windows.Forms.Timer { Interval=5000 }; poll.Tick+=async delegate { if(!busy&&Visible)await RefreshState(); if(!busy) {TryInstallUpdate(); if(Updates.Enabled&&DateTime.UtcNow>=nextUpdate)await CheckUpdate(false);} };
-            Shown+=async delegate { if(startHidden)Hide(); busy=true; try { await Task.Run((Action)controller.Resume); } catch(Exception error) { Report(error); } finally { busy=false; } await RefreshState(); if(!preview) {if(disable.Text=="Восстановить")Reveal();poll.Start();if(Updates.Enabled)await CheckUpdate(false);} };
+            Shown+=async delegate { FitWorkingArea();if(startHidden)Hide(); busy=true; try { await Task.Run((Action)controller.Resume); } catch(Exception error) { Report(error); } finally { busy=false; } await RefreshState();if(workspace!=null)await workspace.Start(); if(!preview) {if(disable.Text=="Восстановить")Reveal();poll.Start();if(Updates.Enabled)await CheckUpdate(false);} };
+            string gpuData=preview?Path.Combine(Path.GetTempPath(),"OpenAntiLag-preview-"+Guid.NewGuid().ToString("N")):Program.DataDirectory;
+            var nvidiaStore=new NvidiaStore(Path.Combine(gpuData,"nvidia-backup.xml"));var amdStore=new AmdStore(Path.Combine(gpuData,"amd-backup.xml"));
+            var nvidiaController=new NvidiaController(()=>new NvidiaDriver(),nvidiaStore);var amdController=new AmdProfiles(()=>new AmdDriver(),amdStore);
             var tabs=new ThemedTabs { Name="mainTabs", Dock=DockStyle.Fill };
             var systemPage=new TabPage("Система") { BackColor=Theme.Background };
-            Controls.Remove(root); systemPage.Controls.Add(root); tabs.TabPages.Add(systemPage); tabs.TabPages.Add(new NvidiaPage(preview,TryAcquireGpu,ReleaseGpu)); tabs.TabPages.Add(new AmdPage(preview,TryAcquireGpu,ReleaseGpu)); Controls.Add(tabs);
+            Controls.Remove(root); systemPage.Controls.Add(root); tabs.TabPages.Add(systemPage); tabs.TabPages.Add(new NvidiaPage(preview,TryAcquireGpu,ReleaseGpu,nvidiaController)); tabs.TabPages.Add(new AmdPage(preview,TryAcquireGpu,ReleaseGpu,amdController)); Controls.Add(tabs);
             tabs.TabPages.Add(new ShaderPage(preview,TryAcquireGpu,ReleaseGpu));
+            var networkMonitor=new NetworkMonitor();
+            tabs.TabPages.Add(new NetworkPage(preview,networkMonitor));tabs.TabPages.Add(new TrafficPage(preview,TryAcquireGpu,ReleaseGpu));tabs.TabPages.Add(new DnsPage(preview,TryAcquireGpu,ReleaseGpu));tabs.TabPages.Add(new StatisticsPage(preview,networkMonitor));
+            tabs.Multiline=true;
+            if(!preview){try{var networkState=new NetworkStateStore().Load();if(networkState.Dns.Count>0||networkState.Qos.Count>0)recoveryResult.Text="Есть сохранённые изменения сети: DNS "+networkState.Dns.Count+", QoS "+networkState.Qos.Count+". Восстановление — на вкладках DNS/Трафик.";}catch(Exception){recoveryResult.Text="Сетевой журнал повреждён. Диагностика работает; запись DNS/QoS заблокирована до восстановления журнала.";}}
+            if(!legacyUi){var context=new PlayerContext(engine,system,AcquirePlayerOperation,ReleaseGpu,preview,networkMonitor,nvidiaController,amdController,nvidiaStore,amdStore);workspace=new PlayerWorkspace(context,tabs,SelectedOptions,SelectedMachineOptions);
+                foreach(TabPage tool in tabs.TabPages){var gpu=tool as NvidiaPage;if(gpu!=null)gpu.OperationCompleted+=(result,success)=>context.Optimizer.ReportExternal("NVIDIA · глобальные настройки",result,success);var radeon=tool as AmdPage;if(radeon!=null)radeon.OperationCompleted+=(result,success)=>context.Optimizer.ReportExternal("AMD · глобальные настройки",result,success);var shaders=tool as ShaderPage;if(shaders!=null)shaders.OperationCompleted+=(result,success)=>context.Optimizer.ReportExternal("Шейдеры",result,success);var diagnostic=tool as ToolPage;if(diagnostic!=null){string name=tool.Text;diagnostic.OperationCompleted+=(result,success)=>context.Optimizer.ReportExternal(name,result,success);}}
+                Controls.Remove(tabs);Controls.Add(workspace);ClientSize=new Size(1180,780);MinimumSize=new Size(800,600);}
             initializing=false;
         }
+        void FitWorkingArea(){var area=Screen.FromControl(this).WorkingArea;MinimumSize=new Size(Math.Min(MinimumSize.Width,Math.Max(320,area.Width-16)),Math.Min(MinimumSize.Height,Math.Max(320,area.Height-16)));Size=new Size(Math.Min(Width,area.Width-16),Math.Min(Height,area.Height-16));}
+        string[] SelectedMachineOptions(){return advanced.Select((box,i)=>new {box,i}).Where(x=>x.box.Checked).Select(x=>MachineSettings.Ids[x.i]).ToArray();}
+        async Task<bool> AcquirePlayerOperation(){await WaitForRead();if(IsDisposed||Disposing||busy||gpuBusy||exiting)return false;gpuBusy=true;return true;}
         internal bool TryAcquireGpu() {if((busy&&!readingState)||gpuBusy||exiting)return false;gpuBusy=true;return true;}
         internal void ReleaseGpu() {gpuBusy=false;}
         protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); WindowTheme.Apply(Handle); }
@@ -138,7 +153,7 @@ namespace OpenAntiLag {
             if(on&&!preview&&Process.GetProcessesByName("68WAntiLagApp").Length>0) { MessageBox.Show(this,"Сначала закройте 68W AntiLag. Его прежние настройки Open AntiLag не отменяет.","Запущен другой AntiLag"); return; }
             busy=true; enable.Enabled=disable.Enabled=restoreBasic.Enabled=startup.Enabled=false; OptionsEnabled(false); status.Text=on?"Применение профиля…":"Восстановление…";
             var options=SelectedOptions();var selected=advanced.Select((box,i)=>new {box,i}).Where(x=>x.box.Checked).Select(x=>MachineSettings.Ids[x.i]).ToArray();
-            try { await Task.Run(delegate { if(on)controller.Enable(options,selected); else controller.Disable(); }); if(!preview)Program.Log(on?"Enabled profile; selected system settings: "+String.Join(",",selected):"Restored profile"); }
+            try { await Task.Run(delegate { if(on)controller.Enable(options,selected); else controller.Disable(); }); if(workspace!=null)workspace.Context.Optimizer.ReportExternal("Windows · дополнительные параметры",on?"Выбранный профиль применён":"Профиль восстановлен",true);if(!preview)Program.Log(on?"Enabled profile; selected system settings: "+String.Join(",",selected):"Restored profile"); }
             catch(Exception error) { recoveryResult.Text=error.Message;Report(error); } finally { busy=false;restoreBasic.Enabled=true; }
             if(!on && engine.State.Phase=="Disabled") {
                 ResetBasicOptions();try{if(system.State.Phase=="Disabled")foreach(var box in advanced)box.Checked=false;}catch(Exception error){recoveryResult.Text=error.Message;}

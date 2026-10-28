@@ -79,7 +79,7 @@ namespace OpenAntiLag {
                 ServicePointManager.SecurityProtocol|=SecurityProtocolType.Tls12;
                 using(var handler=new HttpClientHandler {AllowAutoRedirect=false})
                 using(var client=new HttpClient(handler) {Timeout=TimeSpan.FromMinutes(15)}) {
-                    client.DefaultRequestHeaders.UserAgent.ParseAdd("OpenAntiLag/0.6.4");var uri=new Uri(DownloadUrl);bool downloaded=false;
+                    client.DefaultRequestHeaders.UserAgent.ParseAdd("OpenAntiLag/0.7.0");var uri=new Uri(DownloadUrl);bool downloaded=false;
                     for(int redirect=0;redirect<6;redirect++) {
                         if(!Trusted(uri))throw new InvalidDataException("Недопустимый адрес модуля.");
                         using(var response=await client.GetAsync(uri,HttpCompletionOption.ResponseHeadersRead,ct)) {

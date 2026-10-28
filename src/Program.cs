@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Threading;
 using System.Windows.Forms;
@@ -13,6 +13,7 @@ namespace OpenAntiLag {
         [STAThread] static void Main(string[] args) {
             if (args.Length == 1 && args[0] == "--apply-update") { Environment.ExitCode = Updates.Apply(); return; }
             if (args.Length == 3 && args[0] == "--machine") { Environment.ExitCode = MachineWorker.Run(args[1], args[2]); return; }
+            if(args.Length==4&&args[0]=="--network"){Environment.ExitCode=NetworkWorker.Run(args[1],args[2],args[3]);return;}
             Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
             bool first;
             using (var mutex = new Mutex(true, "Local\\OpenAntiLag-" + Environment.UserName, out first)) {

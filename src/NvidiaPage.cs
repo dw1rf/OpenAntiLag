@@ -17,6 +17,7 @@ namespace OpenAntiLag {
         readonly Func<bool> acquire;
         readonly Action release;
         readonly bool preview, logOperations;
+        public event Action<string,bool> OperationCompleted;
         bool running;
         public NvidiaPage(bool preview,Func<bool> acquire,Action release,NvidiaController controller=null):base("NVIDIA · Глобальные") {
             this.preview=preview;this.acquire=acquire;this.release=release;logOperations=controller==null&&!preview;
@@ -55,8 +56,9 @@ namespace OpenAntiLag {
             status.Text=operation==0?"Читаем NVIDIA…":operation==1?"Сохраняем исходные значения и применяем NVIDIA…":"Восстанавливаем NVIDIA…";
             try {
                 string result=await Task.Run(()=>operation==0?controller.Inspect(settings):operation==1?controller.Apply(settings):controller.Restore());
+                if(operation!=0&&OperationCompleted!=null)OperationCompleted(result,true);
                 if(!IsDisposed){if(operation==0){body.Text=result+"\r\n\r\n"+NvidiaPreset.Description(mode.SelectedIndex==1,(int)fps.Value,power.Checked,quality.Checked);status.Text="Текущие значения прочитаны. Выбранный набор показан ниже них.";}else {status.Text=result;if(logOperations)Program.Log(result);}}
-            } catch(Exception ex) {if(!IsDisposed)status.Text=ex.Message;if(logOperations)Program.Log("NVIDIA: "+ex.Message);}
+            } catch(Exception ex) {if(OperationCompleted!=null)OperationCompleted(ex.Message,false);if(!IsDisposed)status.Text=ex.Message;if(logOperations)Program.Log("NVIDIA: "+ex.Message);}
             finally {running=false;release();if(!IsDisposed){apply.Enabled=restore.Enabled=read.Enabled=mode.Enabled=power.Enabled=quality.Enabled=true;fps.Enabled=mode.SelectedIndex==1;}}
         }
     }
